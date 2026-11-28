@@ -319,11 +319,175 @@ questions:
           ag_top: samples.agent.changed.top_type
           ag_top_n: samples.agent.changed.top_type_n
 
+  # TODO: needs human review
+  - question: >-
+      Do coding agents complete stated tasks more reliably in a Calkit
+      project than in a plain folder, a Makefile project, or a messy one?
+    hypothesis: >-
+      Yes: in a Calkit project, an agent's change reaches every result it
+      affects, the report's numbers stay generated, and nothing unrelated is
+      damaged more often than in the other arms.
+    approach: >-
+      Give a headless coding agent one task in a fresh copy of each arm's
+      template, the same analysis kept five ways (a plain folder, a messy
+      folder with and without Git, a Makefile project, and a Calkit
+      project), and grade the project it leaves with deterministic checks:
+      the report's numbers and figure match the task's reference end state
+      (correct), rerunning the project changes nothing (consistent), no raw
+      data, history, or unrelated file is harmed (damage), and the report's
+      numbers change when the raw data do (traceable).
+    answer:
+      if calkit_all == calkit_n and make_all == make_n and none_trace == 0 and messy_trace == 0 and mgit_trace == 0 and mgit_also == mgit_stale_n - mgit_stale and make_stale == make_stale_n and calkit_stale == calkit_stale_n and none_correct == none_correct_n and messy_correct == messy_correct_n and mgit_correct_n - mgit_correct == mgit_stale_n - mgit_stale: >-
+        Not more than in a careful Makefile project, so far. Every Calkit
+        trial ({calkit_all} of {calkit_n}) and every Makefile trial
+        ({make_all} of {make_n}) passed all four checks. Agents in the plain
+        and messy folders got the numbers right too (correct in
+        {none_correct}/{none_correct_n} plain, {messy_correct}/{messy_correct_n}
+        messy, and {mgit_correct}/{mgit_correct_n} messy-git trials), but
+        none of their reports trace to results (traceable in
+        {none_trace}/{none_trace_n}, {messy_trace}/{messy_trace_n}, and
+        {mgit_trace}/{mgit_trace_n}), since those reports are typed by hand
+        and agents kept them that way. The only failures of correct were in
+        a fresh clone whose last commit changed code without rerunning:
+        messy-git agents passed in {mgit_stale}/{mgit_stale_n}, {mgit_also}
+        of them failing only because they also fixed site D's IDs, which
+        the task didn't ask for, against {make_stale}/{make_stale_n} with
+        Make and {calkit_stale}/{calkit_stale_n} with Calkit.
+        With two trials per arm and task, these tasks were too easy for a
+        capable agent to separate Calkit from Make.
+      else: >-
+        Not settled; see results/agent-reliability.md for every trial.
+    evidence:
+      - kind: result
+        path: results/agent-reliability.json
+        values:
+          calkit_all: arms.calkit.all.n_all_pass
+          calkit_n: arms.calkit.all.n
+          make_all: arms.make.all.n_all_pass
+          make_n: arms.make.all.n
+          none_correct: arms.none.all.correct.pass
+          none_correct_n: arms.none.all.correct.n
+          messy_correct: arms.messy.all.correct.pass
+          messy_correct_n: arms.messy.all.correct.n
+          mgit_correct: arms.messy-git.all.correct.pass
+          mgit_correct_n: arms.messy-git.all.correct.n
+          none_trace: arms.none.all.traceable.pass
+          none_trace_n: arms.none.all.traceable.n
+          messy_trace: arms.messy.all.traceable.pass
+          messy_trace_n: arms.messy.all.traceable.n
+          mgit_trace: arms.messy-git.all.traceable.pass
+          mgit_trace_n: arms.messy-git.all.traceable.n
+          mgit_stale: arms.messy-git.tasks.stale-clone.correct.pass
+          mgit_stale_n: arms.messy-git.tasks.stale-clone.correct.n
+          mgit_also: arms.messy-git.tasks.stale-clone.n_incorrect_from_also_fixing
+          make_stale: arms.make.tasks.stale-clone.correct.pass
+          make_stale_n: arms.make.tasks.stale-clone.correct.n
+          calkit_stale: arms.calkit.tasks.stale-clone.correct.pass
+          calkit_stale_n: arms.calkit.tasks.stale-clone.correct.n
+      - kind: table
+        path: results/agent-reliability.md
+
+  # TODO: needs human review
+  - question: >-
+      Do agents notice silent errors they weren't asked about as often in
+      tidy projects as in messy ones?
+    hypothesis: >-
+      No: a pipeline that reruns everything lets an agent finish a task
+      without looking at the data, so it notices less.
+    approach: >-
+      In every trial whose task isn't fixing it, check whether the agent's
+      final message mentions the planted silent error, the merge dropping
+      site D because its participant IDs aren't zero-padded, by a strict,
+      case-sensitive pattern, and compare the messy arms with the rest by a
+      one-sided Fisher exact test.
+    answer:
+      if rest == 0 and messy > 0 and p < 0.01: >-
+        No, by this measure. Agents mentioned site D's dropped participants
+        unprompted in {messy}/{messy_n} trials in the messy arms (messy
+        {m}/{m_n}, messy-git {g}/{g_n}) and in {rest}/{rest_n} in the
+        others (plain folder {none}/{none_n}, Make {make}/{make_n}, Calkit
+        {calkit}/{calkit_n}; one-sided Fisher exact p = {p:.2g}). The arms
+        also differ in tasks, since the plain folder only took the first
+        four, and the pattern misses mentions in other words. Untested:
+        why, e.g., whether rebuilding a messy project by hand is what
+        makes an agent look at the data.
+      else: >-
+        Not settled; see results/agent-reliability.md for every trial.
+    evidence:
+      - kind: result
+        path: results/agent-reliability.json
+        values:
+          messy: noticing.messy.noticed
+          messy_n: noticing.messy.n
+          rest: noticing.rest.noticed
+          rest_n: noticing.rest.n
+          p: noticing.fisher_p_one_sided
+          m: noticing.arms.messy.noticed
+          m_n: noticing.arms.messy.n
+          g: noticing.arms.messy-git.noticed
+          g_n: noticing.arms.messy-git.n
+          none: noticing.arms.none.noticed
+          none_n: noticing.arms.none.n
+          make: noticing.arms.make.noticed
+          make_n: noticing.arms.make.n
+          calkit: noticing.arms.calkit.noticed
+          calkit_n: noticing.arms.calkit.n
+      - kind: table
+        path: results/agent-reliability.md
+
+  # TODO: needs human review
+  - question: Does Calkit cost agents more time or tokens?
+    hypothesis: >-
+      A little: reading Calkit's skills and running its pipeline take more
+      turns than a Makefile.
+    approach: >-
+      Compare the mean cost the Claude Code CLI reports for each trial,
+      which it computes from tokens, and the agent's time and turns, between
+      arms that took the same tasks in the same batch: none, make, and
+      calkit in batch 1, and make and calkit in batch 2.
+    answer:
+      if b1_calkit_cost > b1_make_cost and b2_calkit_cost > b2_make_cost: >-
+        Somewhat more than Make. On the same tasks, a Calkit trial cost a
+        mean ${b1_calkit_cost:.2f} against ${b1_make_cost:.2f} with Make and
+        ${b1_none_cost:.2f} in a plain folder in batch 1, and
+        ${b2_calkit_cost:.2f} against ${b2_make_cost:.2f} with Make in
+        batch 2, where the messy arms took partly different tasks. It took {b1_calkit_min:.1f} and {b2_calkit_min:.1f} min
+        against Make's {b1_make_min:.1f} and {b2_make_min:.1f}, in more
+        turns ({b1_calkit_turns:.0f} and {b2_calkit_turns:.0f} against
+        {b1_make_turns:.0f} and {b2_make_turns:.0f}).
+      else: >-
+        Not settled; see results/agent-reliability.md for every trial.
+    evidence:
+      - kind: result
+        path: results/agent-reliability.json
+        values:
+          b1_calkit_cost: by_batch.batch-1.calkit.all.mean_cost_usd
+          b1_make_cost: by_batch.batch-1.make.all.mean_cost_usd
+          b1_none_cost: by_batch.batch-1.none.all.mean_cost_usd
+          b2_calkit_cost: by_batch.batch-2.calkit.all.mean_cost_usd
+          b2_make_cost: by_batch.batch-2.make.all.mean_cost_usd
+          b1_calkit_min: by_batch.batch-1.calkit.all.mean_minutes
+          b1_make_min: by_batch.batch-1.make.all.mean_minutes
+          b2_calkit_min: by_batch.batch-2.calkit.all.mean_minutes
+          b2_make_min: by_batch.batch-2.make.all.mean_minutes
+          b1_calkit_turns: by_batch.batch-1.calkit.all.mean_turns
+          b1_make_turns: by_batch.batch-1.make.all.mean_turns
+          b2_calkit_turns: by_batch.batch-2.calkit.all.mean_turns
+          b2_make_turns: by_batch.batch-2.make.all.mean_turns
+      - kind: table
+        path: results/agent-reliability.md
+
 environments:
   main:
     kind: uv
     path: pyproject.toml
     description: Python with pandas, for summarizing results and profiling data.
+  agent-reliability:
+    kind: uv
+    path: agent-reliability/pyproject.toml
+    description: >-
+      Python for the agent reliability benchmark's harness and graders, with
+      the analysis packages every arm uses, pinned as in versions.env.
 
 pipeline:
   stages:
@@ -405,6 +569,259 @@ pipeline:
         - from_stage_outputs: import-hill-roberts
       outputs:
         - path: results/hill-roberts-profile.json
+          storage: git
+    build-agent-reliability-templates:
+      kind: shell-script
+      script_path: agent-reliability/build/build_templates.sh
+      environment: agent-reliability
+      description: >-
+        Build each arm's starting project for the agent reliability
+        benchmark, replaying one research history in the history arms, with
+        the Calkit arm's commands run by Calkit at the commit pinned here,
+        into one archive, since the templates hold nested Git repos. Every
+        commit is the builder's, and times that would only say when the
+        build ran are fixed, so a rebuild gives the same bytes.
+      args:
+        - 4718ca51d76e1d77b4b5d6c582167d697421203d
+        - agent-reliability/templates.tar.gz
+        - agent-reliability/templates.json
+        - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      inputs:
+        - agent-reliability/build
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+        - agent-reliability/versions.env
+      outputs:
+        - agent-reliability/templates.tar.gz
+        - path: agent-reliability/templates.json
+          storage: git
+        - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+    check-agent-reliability-templates:
+      kind: shell-script
+      script_path: agent-reliability/build/check_rebuild.sh
+      environment: agent-reliability
+      description: >-
+        Rebuild the agent reliability templates from scratch and check the
+        archive and the incoming file match the build stage's byte for
+        byte.
+      args:
+        - 4718ca51d76e1d77b4b5d6c582167d697421203d
+        - agent-reliability/templates.json
+        - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+        - agent-reliability/templates-rebuild.json
+      inputs:
+        - from_stage_outputs: build-agent-reliability-templates
+        - agent-reliability/build
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+        - agent-reliability/versions.env
+      outputs:
+        - path: agent-reliability/templates-rebuild.json
+          storage: git
+    build-agent-reliability-reference:
+      kind: python-script
+      script_path: agent-reliability/bench/reference.py
+      environment: agent-reliability
+      description: >-
+        Compute each agent reliability task's reference end state with a
+        reference implementation of the analysis, after checking the
+        regenerated raw data and the templates' results match.
+      args:
+        - agent-reliability/templates.tar.gz
+        - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      inputs:
+        - from_stage_outputs: build-agent-reliability-templates
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+        - agent-reliability/build/generate_data.py
+        - agent-reliability/build/make_corrected_participants.py
+        - agent-reliability/build/shared/make_figure.py
+        - agent-reliability/build/history/make_figure_se.py
+      outputs:
+        - agent-reliability/reference
+    verify-agent-reliability-graders:
+      kind: python-script
+      script_path: agent-reliability/bench/verify.py
+      environment: agent-reliability
+      description: >-
+        Check the agent reliability graders against the Calkit pinned here:
+        unchanged templates should fail, reference solutions pass, and each
+        flawed solution be caught.
+      args:
+        - --templates=agent-reliability/templates.tar.gz
+        - --calkit-rev=4718ca51d76e1d77b4b5d6c582167d697421203d
+        - --jobs=8
+      inputs:
+        - from_stage_outputs: build-agent-reliability-templates
+        - from_stage_outputs: build-agent-reliability-reference
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+        - agent-reliability/bench/grade.py
+        - agent-reliability/bench/new_run.py
+        - agent-reliability/bench/report.py
+        - agent-reliability/bench/solutions.py
+        - agent-reliability/build
+        - agent-reliability/tasks
+        - agent-reliability/preambles
+        - agent-reliability/versions.env
+      outputs:
+        - path: agent-reliability/verification/summary.json
+          storage: git
+        - agent-reliability/verification/grades
+    import-agent-reliability-batch-1:
+      kind: python-script
+      frozen: true
+      script_path: agent-reliability/bench/import_batch.py
+      environment: agent-reliability
+      description: >-
+        Archive the first batch of agent reliability trials, run before the
+        benchmark moved into this project with the same harness (headless
+        claude -p with project settings only, auto permissions, and
+        claude-opus-5-5): 24 trials, the none, make, and calkit arms on
+        filter, fix-merge, new-question, and data-correction, twice each,
+        with Calkit at ff321ac2c and the templates from before the research
+        history was added, which no longer exist; each run's meta.json
+        records its template's Git head and files. Copies each run as it
+        was, except that this machine's global Git email, which template
+        and agent commits made then carry, is replaced with the builder's
+        (builder@example.org) in the copied text files, transcripts
+        included; the projects' Git objects are as they were. Frozen, since
+        the source is a scratch folder outside the repo.
+      args:
+        - /private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/ar-runs
+        - batch-1
+      inputs:
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+      outputs:
+        - agent-reliability/runs/batch-1
+    import-agent-reliability-batch-2:
+      kind: python-script
+      frozen: true
+      script_path: agent-reliability/bench/import_batch.py
+      environment: agent-reliability
+      description: >-
+        Archive the second batch of agent reliability trials, run before the
+        benchmark moved into this project with the same harness (headless
+        claude -p with project settings only, auto permissions, and
+        claude-opus-5-5): 46 trials, the history arms (messy, messy-git,
+        make, calkit) on provenance, regression, undo, and
+        distant-consumer, stale-clone on the Git arms, and fix-merge and
+        data-correction on the messy arms, twice each, with Calkit at
+        4718ca51d and templates built then by an earlier version of the
+        build stage, which differ from its output only where
+        results/agent-reliability.md says. Copies each run as it was,
+        except that this machine's global Git email, which agent commits
+        made then carry, is replaced with the builder's
+        (builder@example.org) in the copied text files, transcripts
+        included; the projects' Git objects are as they were. Frozen, since
+        the source is a scratch folder outside the repo.
+      args:
+        - /private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/ar-runs2
+        - batch-2
+      inputs:
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+      outputs:
+        - agent-reliability/runs/batch-2
+    agent-reliability-batch-3:
+      kind: python-script
+      frozen: true
+      script_path: agent-reliability/bench/run_batch.py
+      environment: agent-reliability
+      description: >-
+        Run the agent reliability trials batches/batch-3.csv lists, each a
+        headless Claude Code session in a fresh copy of its arm's template,
+        in a scratch folder outside the repo, with Calkit at the commit
+        pinned here. Frozen, since agent trials cost money; run with
+        calkit run --force agent-reliability-batch-3.
+      args:
+        - batch-3
+        - --templates=agent-reliability/templates.tar.gz
+        - --calkit-rev=4718ca51d76e1d77b4b5d6c582167d697421203d
+        - --jobs=4
+      inputs:
+        - agent-reliability/batches/batch-3.csv
+        - from_stage_outputs: build-agent-reliability-templates
+        - from_stage_outputs: build-agent-reliability-reference
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+        - agent-reliability/bench/new_run.py
+        - agent-reliability/bench/report.py
+        - agent-reliability/build/snapshot_calkit.sh
+        - agent-reliability/tasks
+        - agent-reliability/preambles
+        - agent-reliability/versions.env
+      outputs:
+        - agent-reliability/runs/batch-3
+    grade-agent-reliability-batch-1:
+      kind: python-script
+      script_path: agent-reliability/bench/regrade.py
+      environment: agent-reliability
+      description: >-
+        Grade every archived run of agent reliability batch-1 with the current
+        graders, each rerun with the Calkit its trial used.
+      args:
+        - batch-1
+        - --jobs=8
+      inputs:
+        - from_stage_outputs: import-agent-reliability-batch-1
+        - from_stage_outputs: build-agent-reliability-reference
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+        - agent-reliability/bench/grade.py
+        - agent-reliability/bench/new_run.py
+        - agent-reliability/bench/report.py
+        - agent-reliability/build/shared/make_figure.py
+        - agent-reliability/build/snapshot_calkit.sh
+        - agent-reliability/versions.env
+      outputs:
+        - agent-reliability/grades/batch-1
+    grade-agent-reliability-batch-2:
+      kind: python-script
+      script_path: agent-reliability/bench/regrade.py
+      environment: agent-reliability
+      description: >-
+        Grade every archived run of agent reliability batch-2 with the current
+        graders, each rerun with the Calkit its trial used.
+      args:
+        - batch-2
+        - --jobs=8
+      inputs:
+        - from_stage_outputs: import-agent-reliability-batch-2
+        - from_stage_outputs: build-agent-reliability-reference
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+        - agent-reliability/bench/grade.py
+        - agent-reliability/bench/new_run.py
+        - agent-reliability/bench/report.py
+        - agent-reliability/build/shared/make_figure.py
+        - agent-reliability/build/snapshot_calkit.sh
+        - agent-reliability/versions.env
+      outputs:
+        - agent-reliability/grades/batch-2
+    summarize-agent-reliability:
+      kind: python-script
+      script_path: agent-reliability/bench/summarize.py
+      environment: agent-reliability
+      description: >-
+        Tally every graded agent reliability batch by arm and task, with
+        cost, time, and turns, unprompted mentions of site D's dropped
+        participants, and tool inputs reaching outside each run.
+      args:
+        - batch-1
+        - batch-2
+      inputs:
+        - from_stage_outputs: import-agent-reliability-batch-1
+        - from_stage_outputs: import-agent-reliability-batch-2
+        - from_stage_outputs: grade-agent-reliability-batch-1
+        - from_stage_outputs: grade-agent-reliability-batch-2
+        - agent-reliability/templates.json
+        - agent-reliability/bench/arms.py
+      outputs:
+        - path: results/agent-reliability.json
+          storage: git
+        - path: results/agent-reliability.md
           storage: git
 
 datasets:

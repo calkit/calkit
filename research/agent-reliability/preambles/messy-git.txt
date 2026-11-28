@@ -1,0 +1,1 @@
+You're working in a research project in {project}. Python 3.12 with the packages it needs is at {venv}/bin/python; that folder is first on PATH, so `python` and `jupyter` run it. Nobody is available to answer questions, so make reasonable choices and finish the task.

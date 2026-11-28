@@ -90,6 +90,30 @@ to see which kinds change conclusions and who finds them.
 
 <!-- TODO: needs human review -->
 
+## Agent reliability
+
+Whether coding agents change a research project more reliably when it's a
+Calkit project than when it's a plain folder, a Makefile project, or a
+messy one, by trials of one agent on one task in a fresh copy of each
+arm's project, graded by deterministic checks.
+
+- `agent-reliability/README.md`: the arms, tasks, graders, and how to run a
+  batch
+- `agent-reliability/templates.tar.gz`: each arm's starting project, built
+  by a stage that replays one research history, with Calkit pinned by
+  commit in `calkit.yaml`, and checked to rebuild byte for byte
+- `agent-reliability/runs/batch-<n>/`: each trial as the agent left it;
+  batches 1 and 2 ran before the benchmark moved here and are archived by
+  frozen import stages, and later batches run by frozen trial stages from
+  `agent-reliability/batches/batch-<n>.csv`
+- `agent-reliability/grades/batch-<n>/`: every trial graded by the current
+  graders, so a grader fix regrades without rerunning agents
+- `results/agent-reliability.json` and `.md`: passes by arm and task, cost
+  and time, unprompted mentions of the site the merge drops, and tool
+  inputs that reached outside a trial's folder
+
+<!-- TODO: needs human review -->
+
 ## Adoption
 
 Whether question-driven development with a coding agent is what gets

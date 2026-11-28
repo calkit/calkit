@@ -250,8 +250,16 @@ disallow_any_unimported = false
 target-version = "py310"
 line-length = 79
 fix = true
-# research/audit-speed records the code a study ran, byte for byte
-extend-exclude = ["hub/backend/app/alembic", "research/audit-speed"]
+# research/audit-speed records the code a study ran, byte for byte, and the
+# agent reliability benchmark's templates are built from these folders'
+extend-exclude = [
+  "hub/backend/app/alembic",
+  "research/audit-speed",
+  "research/agent-reliability/build/calkit",
+  "research/agent-reliability/build/history",
+  "research/agent-reliability/build/none",
+  "research/agent-reliability/build/shared",
+]
 
 [tool.ruff.per-file-target-version]
 "hub/backend/**" = "py312"

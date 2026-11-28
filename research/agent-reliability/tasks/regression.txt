@@ -1,0 +1,1 @@
+The main training effect in the submitted draft is {submitted_effect} points; the current analysis gives {current_effect}. Explain exactly what changed between the two and why, step by step, with the effect after each step, in CHANGES.md in the project folder. Leave the rest of the project as it is.

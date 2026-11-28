@@ -84,3 +84,222 @@ stages:
           persist: false
     desc: Automatically generated from the 'profile-hill-roberts' stage in
       calkit.yaml. Changes made here will be overwritten.
+  build-agent-reliability-templates:
+    cmd: calkit xenv -n agent-reliability --no-check -- bash --noprofile --norc
+      agent-reliability/build/build_templates.sh
+      4718ca51d76e1d77b4b5d6c582167d697421203d
+      agent-reliability/templates.tar.gz agent-reliability/templates.json
+      agent-reliability/incoming/participants_2026-05-20_corrected.csv
+    deps:
+      - agent-reliability/build/build_templates.sh
+      - agent-reliability/build
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/versions.env
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+    outs:
+      - agent-reliability/templates.tar.gz
+      - agent-reliability/templates.json:
+          cache: false
+          persist: false
+      - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+    desc: Automatically generated from the 'build-agent-reliability-templates'
+      stage in calkit.yaml. Changes made here will be overwritten.
+  check-agent-reliability-templates:
+    cmd: calkit xenv -n agent-reliability --no-check -- bash --noprofile --norc
+      agent-reliability/build/check_rebuild.sh
+      4718ca51d76e1d77b4b5d6c582167d697421203d agent-reliability/templates.json
+      agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      agent-reliability/templates-rebuild.json
+    deps:
+      - agent-reliability/build/check_rebuild.sh
+      - agent-reliability/build
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/versions.env
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+      - agent-reliability/templates.tar.gz
+      - agent-reliability/templates.json
+      - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+    outs:
+      - agent-reliability/templates-rebuild.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'check-agent-reliability-templates'
+      stage in calkit.yaml. Changes made here will be overwritten.
+  build-agent-reliability-reference:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/reference.py agent-reliability/templates.tar.gz
+      agent-reliability/incoming/participants_2026-05-20_corrected.csv
+    deps:
+      - agent-reliability/bench/reference.py
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/build/generate_data.py
+      - agent-reliability/build/make_corrected_participants.py
+      - agent-reliability/build/shared/make_figure.py
+      - agent-reliability/build/history/make_figure_se.py
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+      - agent-reliability/templates.tar.gz
+      - agent-reliability/templates.json
+      - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+    outs:
+      - agent-reliability/reference
+    desc: Automatically generated from the 'build-agent-reliability-reference'
+      stage in calkit.yaml. Changes made here will be overwritten.
+  verify-agent-reliability-graders:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/verify.py
+      --templates=agent-reliability/templates.tar.gz
+      --calkit-rev=4718ca51d76e1d77b4b5d6c582167d697421203d --jobs=8
+    deps:
+      - agent-reliability/bench/verify.py
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/bench/grade.py
+      - agent-reliability/bench/new_run.py
+      - agent-reliability/bench/report.py
+      - agent-reliability/bench/solutions.py
+      - agent-reliability/build
+      - agent-reliability/tasks
+      - agent-reliability/preambles
+      - agent-reliability/versions.env
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+      - agent-reliability/templates.tar.gz
+      - agent-reliability/templates.json
+      - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      - agent-reliability/reference
+    outs:
+      - agent-reliability/verification/summary.json:
+          cache: false
+          persist: false
+      - agent-reliability/verification/grades
+    desc: Automatically generated from the 'verify-agent-reliability-graders'
+      stage in calkit.yaml. Changes made here will be overwritten.
+  import-agent-reliability-batch-1:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/import_batch.py
+      /private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/ar-runs
+      batch-1
+    deps:
+      - agent-reliability/bench/import_batch.py
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+    outs:
+      - agent-reliability/runs/batch-1
+    frozen: true
+    desc: Automatically generated from the 'import-agent-reliability-batch-1'
+      stage in calkit.yaml. Changes made here will be overwritten.
+  import-agent-reliability-batch-2:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/import_batch.py
+      /private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/ar-runs2
+      batch-2
+    deps:
+      - agent-reliability/bench/import_batch.py
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+    outs:
+      - agent-reliability/runs/batch-2
+    frozen: true
+    desc: Automatically generated from the 'import-agent-reliability-batch-2'
+      stage in calkit.yaml. Changes made here will be overwritten.
+  agent-reliability-batch-3:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/run_batch.py batch-3
+      --templates=agent-reliability/templates.tar.gz
+      --calkit-rev=4718ca51d76e1d77b4b5d6c582167d697421203d --jobs=4
+    deps:
+      - agent-reliability/bench/run_batch.py
+      - agent-reliability/batches/batch-3.csv
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/bench/new_run.py
+      - agent-reliability/bench/report.py
+      - agent-reliability/build/snapshot_calkit.sh
+      - agent-reliability/tasks
+      - agent-reliability/preambles
+      - agent-reliability/versions.env
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+      - agent-reliability/templates.tar.gz
+      - agent-reliability/templates.json
+      - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      - agent-reliability/reference
+    outs:
+      - agent-reliability/runs/batch-3
+    frozen: true
+    desc: Automatically generated from the 'agent-reliability-batch-3' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  grade-agent-reliability-batch-1:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/regrade.py batch-1 --jobs=8
+    deps:
+      - agent-reliability/bench/regrade.py
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/bench/grade.py
+      - agent-reliability/bench/new_run.py
+      - agent-reliability/bench/report.py
+      - agent-reliability/build/shared/make_figure.py
+      - agent-reliability/build/snapshot_calkit.sh
+      - agent-reliability/versions.env
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+      - agent-reliability/runs/batch-1
+      - agent-reliability/reference
+    outs:
+      - agent-reliability/grades/batch-1
+    desc: Automatically generated from the 'grade-agent-reliability-batch-1'
+      stage in calkit.yaml. Changes made here will be overwritten.
+  grade-agent-reliability-batch-2:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/regrade.py batch-2 --jobs=8
+    deps:
+      - agent-reliability/bench/regrade.py
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/bench/grade.py
+      - agent-reliability/bench/new_run.py
+      - agent-reliability/bench/report.py
+      - agent-reliability/build/shared/make_figure.py
+      - agent-reliability/build/snapshot_calkit.sh
+      - agent-reliability/versions.env
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+      - agent-reliability/runs/batch-2
+      - agent-reliability/reference
+    outs:
+      - agent-reliability/grades/batch-2
+    desc: Automatically generated from the 'grade-agent-reliability-batch-2'
+      stage in calkit.yaml. Changes made here will be overwritten.
+  summarize-agent-reliability:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/summarize.py batch-1 batch-2
+    deps:
+      - agent-reliability/bench/summarize.py
+      - agent-reliability/templates.json
+      - agent-reliability/bench/arms.py
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+      - agent-reliability/runs/batch-1
+      - agent-reliability/runs/batch-2
+      - agent-reliability/grades/batch-1
+      - agent-reliability/grades/batch-2
+    outs:
+      - results/agent-reliability.json:
+          cache: false
+          persist: false
+      - results/agent-reliability.md:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'summarize-agent-reliability' stage
+      in calkit.yaml. Changes made here will be overwritten.

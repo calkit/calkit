@@ -1,0 +1,1 @@
+The trial coordinator sent a corrected participants file, saved at {incoming}/participants_2026-05-20_corrected.csv. Three participants' ages and five participants' sex were entered wrong in the original; nothing else changed. Use the corrected file and update everything that depends on it.

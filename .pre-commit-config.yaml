@@ -91,9 +91,10 @@ repos:
         # take turns reformatting the same file.
         # Likewise results files, here, in the example projects, and in
         # decisions and research, which are stage outputs and have to match
-        # what the stage wrote byte for byte, and research/audit-speed, which
-        # records what a study ran.
-        exclude: calkit|^hub/|(^|/)dvc\.yaml$|^((examples/.*|decisions|research)/)?results/|^research/audit-speed/
+        # what the stage wrote byte for byte, research/audit-speed, which
+        # records what a study ran, and the agent reliability benchmark's
+        # build files, which its templates are built from.
+        exclude: calkit|^hub/|(^|/)dvc\.yaml$|^((examples/.*|decisions|research)/)?results/|^research/audit-speed/|^research/agent-reliability/build/
 
   - repo: local
     hooks:

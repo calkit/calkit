@@ -146,3 +146,576 @@ stages:
       hash: md5
       md5: 388c0483ffd6c7dbf522857e195c70b7
       size: 3685
+  build-agent-reliability-templates:
+    cmd: calkit xenv -n agent-reliability --no-check -- bash --noprofile --norc 
+      agent-reliability/build/build_templates.sh 
+      4718ca51d76e1d77b4b5d6c582167d697421203d 
+      agent-reliability/templates.tar.gz agent-reliability/templates.json 
+      agent-reliability/incoming/participants_2026-05-20_corrected.csv
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 6f96c5e062a9b79a3a51f7b67e400856
+      size: 3199
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8749dc4431e9ef8b9d5f3ac19f987194
+      size: 11757
+    - path: agent-reliability/build
+      hash: md5
+      md5: 8639ce81051e4d09f1d3905cea91aa3e.dir
+      size: 354699
+      nfiles: 34
+    - path: agent-reliability/build/build_templates.sh
+      hash: md5
+      md5: e57554c01342e404750916e8acdcbac4
+      size: 4544
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    - path: agent-reliability/versions.env
+      hash: md5
+      md5: 60a2a9eb8835a0bd46ab5b75fe4a0f62
+      size: 545
+    outs:
+    - path: agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      hash: md5
+      md5: 3bcb2940b2e7f077d222d7c865b4387a
+      size: 20021
+    - path: agent-reliability/templates.json
+      hash: md5
+      md5: eb477852bc2b3ba7b7edd0b731c11339
+      size: 19441
+    - path: agent-reliability/templates.tar.gz
+      hash: md5
+      md5: 757e8141d4a21a8f3670107c2cf4baf3
+      size: 2632568
+  check-agent-reliability-templates:
+    cmd: calkit xenv -n agent-reliability --no-check -- bash --noprofile --norc 
+      agent-reliability/build/check_rebuild.sh 
+      4718ca51d76e1d77b4b5d6c582167d697421203d agent-reliability/templates.json 
+      agent-reliability/incoming/participants_2026-05-20_corrected.csv 
+      agent-reliability/templates-rebuild.json
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 6f96c5e062a9b79a3a51f7b67e400856
+      size: 3199
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8749dc4431e9ef8b9d5f3ac19f987194
+      size: 11757
+    - path: agent-reliability/build
+      hash: md5
+      md5: 8639ce81051e4d09f1d3905cea91aa3e.dir
+      size: 354699
+      nfiles: 34
+    - path: agent-reliability/build/check_rebuild.sh
+      hash: md5
+      md5: 404d64231015ae3042b2c237d353828f
+      size: 1357
+    - path: agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      hash: md5
+      md5: 3bcb2940b2e7f077d222d7c865b4387a
+      size: 20021
+    - path: agent-reliability/templates.json
+      hash: md5
+      md5: eb477852bc2b3ba7b7edd0b731c11339
+      size: 19441
+    - path: agent-reliability/templates.tar.gz
+      hash: md5
+      md5: 757e8141d4a21a8f3670107c2cf4baf3
+      size: 2632568
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    - path: agent-reliability/versions.env
+      hash: md5
+      md5: 60a2a9eb8835a0bd46ab5b75fe4a0f62
+      size: 545
+    outs:
+    - path: agent-reliability/templates-rebuild.json
+      hash: md5
+      md5: 08eb9318a5df7a0c9c48b79ee0d05eeb
+      size: 394
+  import-agent-reliability-batch-2:
+    cmd: calkit xenv -n agent-reliability --no-check -- python 
+      agent-reliability/bench/import_batch.py 
+      /private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/ar-runs2
+      batch-2
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 601eb72244a252041b6bcaaa4424edbf
+      size: 3158
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8f25aecb2201fe3aa29ecf97ac5a4bdf
+      size: 11740
+    - path: agent-reliability/bench/import_batch.py
+      hash: md5
+      md5: 3394d1f418f0614586bb3c3e467c842b
+      size: 2866
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    outs:
+    - path: agent-reliability/runs/batch-2
+      hash: md5
+      md5: 0a23609d849e37026709df7dc3387d25.dir
+      size: 25349012
+      nfiles: 368
+  import-agent-reliability-batch-1:
+    cmd: calkit xenv -n agent-reliability --no-check -- python 
+      agent-reliability/bench/import_batch.py 
+      /private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/ar-runs
+      batch-1
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 601eb72244a252041b6bcaaa4424edbf
+      size: 3158
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8f25aecb2201fe3aa29ecf97ac5a4bdf
+      size: 11740
+    - path: agent-reliability/bench/import_batch.py
+      hash: md5
+      md5: 3394d1f418f0614586bb3c3e467c842b
+      size: 2866
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    outs:
+    - path: agent-reliability/runs/batch-1
+      hash: md5
+      md5: aa16909691318876767e3337c207bb1c.dir
+      size: 9191006
+      nfiles: 192
+  build-agent-reliability-reference:
+    cmd: calkit xenv -n agent-reliability --no-check -- python 
+      agent-reliability/bench/reference.py agent-reliability/templates.tar.gz 
+      agent-reliability/incoming/participants_2026-05-20_corrected.csv
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 6f96c5e062a9b79a3a51f7b67e400856
+      size: 3199
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8749dc4431e9ef8b9d5f3ac19f987194
+      size: 11757
+    - path: agent-reliability/bench/reference.py
+      hash: md5
+      md5: 3900d0301aedbfbd3972b95a4634ca24
+      size: 15208
+    - path: agent-reliability/build/generate_data.py
+      hash: md5
+      md5: 91c480b4ea08ef5fad12074e4969c2f0
+      size: 4710
+    - path: agent-reliability/build/history/make_figure_se.py
+      hash: md5
+      md5: dcaf8d8bef2be73672a5fa330fbb57a5
+      size: 1866
+    - path: agent-reliability/build/make_corrected_participants.py
+      hash: md5
+      md5: f274d71cdf0230a64b2e70468a893424
+      size: 1079
+    - path: agent-reliability/build/shared/make_figure.py
+      hash: md5
+      md5: d9cc6be733e623bc86ff276b7b80a892
+      size: 1873
+    - path: agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      hash: md5
+      md5: 3bcb2940b2e7f077d222d7c865b4387a
+      size: 20021
+    - path: agent-reliability/templates.json
+      hash: md5
+      md5: eb477852bc2b3ba7b7edd0b731c11339
+      size: 19441
+    - path: agent-reliability/templates.tar.gz
+      hash: md5
+      md5: 757e8141d4a21a8f3670107c2cf4baf3
+      size: 2632568
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    outs:
+    - path: agent-reliability/reference
+      hash: md5
+      md5: aacae8b509274ea2f60e1435c12660c4.dir
+      size: 736514
+      nfiles: 30
+  grade-agent-reliability-batch-2:
+    cmd: calkit xenv -n agent-reliability --no-check -- python 
+      agent-reliability/bench/regrade.py batch-2 --jobs=8
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 6f96c5e062a9b79a3a51f7b67e400856
+      size: 3199
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8749dc4431e9ef8b9d5f3ac19f987194
+      size: 11757
+    - path: agent-reliability/bench/grade.py
+      hash: md5
+      md5: 64cd55d9177714e11e97672acb8b80f9
+      size: 37200
+    - path: agent-reliability/bench/new_run.py
+      hash: md5
+      md5: 224fc631265cc52ff9696ba6d9c59ccf
+      size: 8944
+    - path: agent-reliability/bench/regrade.py
+      hash: md5
+      md5: 69e532b5d5a1fe53691081026abf9d1b
+      size: 3339
+    - path: agent-reliability/bench/report.py
+      hash: md5
+      md5: 294c566d8cf66c52dcfce0cfa690c8c8
+      size: 7831
+    - path: agent-reliability/build/shared/make_figure.py
+      hash: md5
+      md5: d9cc6be733e623bc86ff276b7b80a892
+      size: 1873
+    - path: agent-reliability/build/snapshot_calkit.sh
+      hash: md5
+      md5: f81914c853294452884cc9d597e127f9
+      size: 2341
+    - path: agent-reliability/reference
+      hash: md5
+      md5: aacae8b509274ea2f60e1435c12660c4.dir
+      size: 736514
+      nfiles: 30
+    - path: agent-reliability/runs/batch-2
+      hash: md5
+      md5: 0a23609d849e37026709df7dc3387d25.dir
+      size: 25349012
+      nfiles: 368
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    - path: agent-reliability/versions.env
+      hash: md5
+      md5: 60a2a9eb8835a0bd46ab5b75fe4a0f62
+      size: 545
+    outs:
+    - path: agent-reliability/grades/batch-2
+      hash: md5
+      md5: 0b5b09ba80f40a72a498cd568388e7c7.dir
+      size: 481262
+      nfiles: 46
+  grade-agent-reliability-batch-1:
+    cmd: calkit xenv -n agent-reliability --no-check -- python 
+      agent-reliability/bench/regrade.py batch-1 --jobs=8
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 6f96c5e062a9b79a3a51f7b67e400856
+      size: 3199
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8749dc4431e9ef8b9d5f3ac19f987194
+      size: 11757
+    - path: agent-reliability/bench/grade.py
+      hash: md5
+      md5: 64cd55d9177714e11e97672acb8b80f9
+      size: 37200
+    - path: agent-reliability/bench/new_run.py
+      hash: md5
+      md5: 224fc631265cc52ff9696ba6d9c59ccf
+      size: 8944
+    - path: agent-reliability/bench/regrade.py
+      hash: md5
+      md5: 69e532b5d5a1fe53691081026abf9d1b
+      size: 3339
+    - path: agent-reliability/bench/report.py
+      hash: md5
+      md5: 294c566d8cf66c52dcfce0cfa690c8c8
+      size: 7831
+    - path: agent-reliability/build/shared/make_figure.py
+      hash: md5
+      md5: d9cc6be733e623bc86ff276b7b80a892
+      size: 1873
+    - path: agent-reliability/build/snapshot_calkit.sh
+      hash: md5
+      md5: f81914c853294452884cc9d597e127f9
+      size: 2341
+    - path: agent-reliability/reference
+      hash: md5
+      md5: aacae8b509274ea2f60e1435c12660c4.dir
+      size: 736514
+      nfiles: 30
+    - path: agent-reliability/runs/batch-1
+      hash: md5
+      md5: aa16909691318876767e3337c207bb1c.dir
+      size: 9191006
+      nfiles: 192
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    - path: agent-reliability/versions.env
+      hash: md5
+      md5: 60a2a9eb8835a0bd46ab5b75fe4a0f62
+      size: 545
+    outs:
+    - path: agent-reliability/grades/batch-1
+      hash: md5
+      md5: 21d9d33a28eda37ddd1c7e08a146598d.dir
+      size: 364882
+      nfiles: 24
+  summarize-agent-reliability:
+    cmd: calkit xenv -n agent-reliability --no-check -- python 
+      agent-reliability/bench/summarize.py batch-1 batch-2
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8749dc4431e9ef8b9d5f3ac19f987194
+      size: 11757
+    - path: agent-reliability/bench/summarize.py
+      hash: md5
+      md5: 1bda34e5dcf8fb7126b0c2c97f28babf
+      size: 14367
+    - path: agent-reliability/grades/batch-1
+      hash: md5
+      md5: 21d9d33a28eda37ddd1c7e08a146598d.dir
+      size: 364882
+      nfiles: 24
+    - path: agent-reliability/grades/batch-2
+      hash: md5
+      md5: 0b5b09ba80f40a72a498cd568388e7c7.dir
+      size: 481262
+      nfiles: 46
+    - path: agent-reliability/runs/batch-1
+      hash: md5
+      md5: aa16909691318876767e3337c207bb1c.dir
+      size: 9191006
+      nfiles: 192
+    - path: agent-reliability/runs/batch-2
+      hash: md5
+      md5: 0a23609d849e37026709df7dc3387d25.dir
+      size: 25349012
+      nfiles: 368
+    - path: agent-reliability/templates.json
+      hash: md5
+      md5: eb477852bc2b3ba7b7edd0b731c11339
+      size: 19441
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    outs:
+    - path: results/agent-reliability.json
+      hash: md5
+      md5: ed238469f060f557dd0621fe9de4b61e
+      size: 122655
+    - path: results/agent-reliability.md
+      hash: md5
+      md5: 732726dca84c7f5dc2a6d090e1339726
+      size: 9486
+  verify-agent-reliability-graders:
+    cmd: calkit xenv -n agent-reliability --no-check -- python 
+      agent-reliability/bench/verify.py 
+      --templates=agent-reliability/templates.tar.gz 
+      --calkit-rev=4718ca51d76e1d77b4b5d6c582167d697421203d --jobs=8
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 6f96c5e062a9b79a3a51f7b67e400856
+      size: 3199
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8749dc4431e9ef8b9d5f3ac19f987194
+      size: 11757
+    - path: agent-reliability/bench/grade.py
+      hash: md5
+      md5: 64cd55d9177714e11e97672acb8b80f9
+      size: 37200
+    - path: agent-reliability/bench/new_run.py
+      hash: md5
+      md5: 224fc631265cc52ff9696ba6d9c59ccf
+      size: 8944
+    - path: agent-reliability/bench/report.py
+      hash: md5
+      md5: 294c566d8cf66c52dcfce0cfa690c8c8
+      size: 7831
+    - path: agent-reliability/bench/solutions.py
+      hash: md5
+      md5: 22612525ffcc06a472251ade7357745b
+      size: 30185
+    - path: agent-reliability/bench/verify.py
+      hash: md5
+      md5: 00e09400aa1b0346f494e3ff1ceda532
+      size: 4403
+    - path: agent-reliability/build
+      hash: md5
+      md5: 8639ce81051e4d09f1d3905cea91aa3e.dir
+      size: 354699
+      nfiles: 34
+    - path: agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      hash: md5
+      md5: 3bcb2940b2e7f077d222d7c865b4387a
+      size: 20021
+    - path: agent-reliability/preambles
+      hash: md5
+      md5: 6f765457e34acf7344358a8d1e44ee7a.dir
+      size: 1468
+      nfiles: 5
+    - path: agent-reliability/reference
+      hash: md5
+      md5: aacae8b509274ea2f60e1435c12660c4.dir
+      size: 736514
+      nfiles: 30
+    - path: agent-reliability/tasks
+      hash: md5
+      md5: febf7a0113ceb64fc74917f6aab2fc5f.dir
+      size: 1725
+      nfiles: 9
+    - path: agent-reliability/templates.json
+      hash: md5
+      md5: eb477852bc2b3ba7b7edd0b731c11339
+      size: 19441
+    - path: agent-reliability/templates.tar.gz
+      hash: md5
+      md5: 757e8141d4a21a8f3670107c2cf4baf3
+      size: 2632568
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    - path: agent-reliability/versions.env
+      hash: md5
+      md5: 60a2a9eb8835a0bd46ab5b75fe4a0f62
+      size: 545
+    outs:
+    - path: agent-reliability/verification/grades
+      hash: md5
+      md5: 82ea5e51da300aef67ac70ef3455525b.dir
+      size: 1181086
+      nfiles: 96
+    - path: agent-reliability/verification/summary.json
+      hash: md5
+      md5: 78d8bfe516390b8ec3f07c477583e60b
+      size: 29447
+  agent-reliability-batch-3:
+    cmd: calkit xenv -n agent-reliability --no-check -- python 
+      agent-reliability/bench/run_batch.py batch-3 
+      --templates=agent-reliability/templates.tar.gz 
+      --calkit-rev=4718ca51d76e1d77b4b5d6c582167d697421203d --jobs=4
+    deps:
+    - path: agent-reliability/.python-version
+      hash: md5
+      md5: bb4d8ae57cc7291da1a41d52d740c3fd
+      size: 8
+    - path: agent-reliability/batches/batch-3.csv
+      hash: md5
+      md5: 1608460df43f1bcc33588a65320787a2
+      size: 19
+    - path: agent-reliability/bench/archive.py
+      hash: md5
+      md5: 6f96c5e062a9b79a3a51f7b67e400856
+      size: 3199
+    - path: agent-reliability/bench/arms.py
+      hash: md5
+      md5: 8749dc4431e9ef8b9d5f3ac19f987194
+      size: 11757
+    - path: agent-reliability/bench/new_run.py
+      hash: md5
+      md5: 224fc631265cc52ff9696ba6d9c59ccf
+      size: 8944
+    - path: agent-reliability/bench/report.py
+      hash: md5
+      md5: 294c566d8cf66c52dcfce0cfa690c8c8
+      size: 7831
+    - path: agent-reliability/bench/run_batch.py
+      hash: md5
+      md5: fc2c9e2fd8eabb34ddf969065a0543ef
+      size: 6493
+    - path: agent-reliability/build/snapshot_calkit.sh
+      hash: md5
+      md5: f81914c853294452884cc9d597e127f9
+      size: 2341
+    - path: agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      hash: md5
+      md5: 3bcb2940b2e7f077d222d7c865b4387a
+      size: 20021
+    - path: agent-reliability/preambles
+      hash: md5
+      md5: 6f765457e34acf7344358a8d1e44ee7a.dir
+      size: 1468
+      nfiles: 5
+    - path: agent-reliability/reference
+      hash: md5
+      md5: aacae8b509274ea2f60e1435c12660c4.dir
+      size: 736514
+      nfiles: 30
+    - path: agent-reliability/tasks
+      hash: md5
+      md5: febf7a0113ceb64fc74917f6aab2fc5f.dir
+      size: 1725
+      nfiles: 9
+    - path: agent-reliability/templates.json
+      hash: md5
+      md5: eb477852bc2b3ba7b7edd0b731c11339
+      size: 19441
+    - path: agent-reliability/templates.tar.gz
+      hash: md5
+      md5: 757e8141d4a21a8f3670107c2cf4baf3
+      size: 2632568
+    - path: agent-reliability/uv.lock
+      hash: md5
+      md5: a5c1b418ed502e49e7aaa117e1d58fa3
+      size: 404109
+    - path: agent-reliability/versions.env
+      hash: md5
+      md5: 60a2a9eb8835a0bd46ab5b75fe4a0f62
+      size: 545
+    outs:
+    - path: agent-reliability/runs/batch-3
+      hash: md5
+      md5: 228cbd239caeabcb127f52f266ee6c5b.dir
+      size: 19
+      nfiles: 1

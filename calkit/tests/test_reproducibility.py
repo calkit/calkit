@@ -430,7 +430,6 @@ def test_repro_check_summary() -> None:
         ("stage_runs_unrecorded", "unrecorded-runs"),
         ("absent_stages", "not-present"),
         ("misc_no_provenance", "misc"),
-        ("not_checked", "not-checked"),
         ("eol_rewritten", "rewritten-line-endings"),
     ]:
         check = ReproCheck.model_validate(audited | {field: ["x"]})
@@ -445,6 +444,7 @@ def test_repro_check_summary() -> None:
     # Each problem fails it, under its category
     for field, category in [
         ("pipeline_errors", "pipeline-errors"),
+        ("not_checked", "not-checked"),
         ("stale_stages", "stale"),
         ("uncompiled_stages", "uncompiled"),
         ("stage_run_problems", "stage-runs"),
@@ -473,7 +473,8 @@ def test_repro_check_summary() -> None:
         # Checked with nothing wrong, it passes, with nothing to list
         check = ReproCheck.model_validate(audited | {field: []})
         assert check.passed
-        if field != "pipeline_errors":
+        # Like an error, a check that ran adds no line saying so
+        if field not in ("pipeline_errors", "not_checked"):
             assert ": 0 " in check.to_pretty()
         assert f"[-c {category}]" not in check.to_pretty()
     # Storage is only fixed with --fix where that fixes it

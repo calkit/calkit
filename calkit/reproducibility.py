@@ -271,6 +271,8 @@ class ReproCheck(BaseModel):
                 "The pipeline's status couldn't be checked: "
                 f"{self.pipeline_errors[0]}"
             )
+        if self.not_checked:
+            return f"Not checked: {self.not_checked[0]}."
         if self.uncompiled_stages:
             return (
                 "dvc.yaml isn't compiled from calkit.yaml, e.g., for stage "
@@ -370,8 +372,6 @@ class ReproCheck(BaseModel):
                 f"not here, e.g., {self.absent_stages[0]}, so they couldn't "
                 "be checked. Run `calkit pull` to get them."
             )
-        if self.not_checked:
-            return f"Not checked: {self.not_checked[0]}."
         if not self.has_readme:
             return (
                 "There is no README.md file. "
@@ -482,6 +482,15 @@ class ReproCheck(BaseModel):
         add("Is a Git repo", ok=self.is_git_repo)
         if self.pipeline_errors:
             add("Pipeline status", "unavailable", False, "pipeline-errors")
+        # A pass would claim what these didn't check, e.g., while another
+        # process holds DVC's lock
+        if self.not_checked:
+            add(
+                "Checks that couldn't run",
+                len(self.not_checked),
+                False,
+                "not-checked",
+            )
         elif self.stale_stages is not None:
             n = len(self.stale_stages)
             add("Pipeline stages out of date", n, n == 0, "stale")
@@ -579,12 +588,6 @@ class ReproCheck(BaseModel):
                 "Stages whose files aren't here; run `calkit pull`",
                 len(self.absent_stages),
                 category="not-present",
-            )
-        if self.not_checked:
-            add(
-                "Checks that couldn't run",
-                len(self.not_checked),
-                category="not-checked",
             )
         if not self.has_readme:
             add("No README.md")

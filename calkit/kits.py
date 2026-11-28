@@ -52,6 +52,8 @@ PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 # drops the calkit rather than carrying a claim that no longer holds
 PNG_CHUNK_TYPE = b"caLK"
 PDF_ATTACHMENT_NAME = "calkit.zip"
+# Tags recording calkits are named, e.g., kit/figures/plot.png/DATE-HASH
+RECORD_TAG_PREFIX = "kit/"
 # What wraps a calkit's base64 in text formats, by format, and the tag it
 # goes before
 MARKUP_COMMENT = (
@@ -1106,7 +1108,7 @@ def get_hub_file_url(manifest: Manifest) -> str | None:
 
 def get_record_tag_name(kit: bytes, manifest: Manifest, date: str) -> str:
     """Get the name of the tag recording a calkit, e.g.,
-    ``calkit/figures/plot.png/2026-11-27-1a2b3c4``, which is unique to the
+    ``kit/figures/plot.png/2026-11-27-1a2b3c4``, which is unique to the
     calkit and valid as a Git ref.
     """
     parts = []
@@ -1115,7 +1117,7 @@ def get_record_tag_name(kit: bytes, manifest: Manifest, date: str) -> str:
         part = part.lstrip(".").removesuffix(".lock") or "-"
         parts.append(part)
     kit_sha256 = hashlib.sha256(kit).hexdigest()
-    return f"calkit/{'/'.join(parts)}/{date}-{kit_sha256[:7]}"
+    return f"{RECORD_TAG_PREFIX}{'/'.join(parts)}/{date}-{kit_sha256[:7]}"
 
 
 def record(kit: bytes, manifest: Manifest) -> str:
@@ -1171,7 +1173,7 @@ def get_records() -> list[dict]:
     import calkit.git
 
     out = calkit.git.get_repo().git.for_each_ref(
-        "refs/tags/calkit/",
+        f"refs/tags/{RECORD_TAG_PREFIX}",
         "--sort=-creatordate",
         "--format=%(refname:strip=2)%00%(contents)%1e",
     )

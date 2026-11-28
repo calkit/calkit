@@ -21,7 +21,7 @@ The copy opens like any other PNG.
 Add `--to-clipboard` to copy it, as a file, to paste into a chat or email.
 
 Each calkit is recorded as a Git tag, e.g.,
-`calkit/figures/plot.png/2026-11-27-1a2b3c4`,
+`kit/figures/plot.png/2026-11-27-1a2b3c4`,
 at the commit it came from, and the tag is pushed,
 so the project keeps track of what's been shared
 without any of its files changing,

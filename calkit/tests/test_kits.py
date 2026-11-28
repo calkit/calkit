@@ -549,7 +549,7 @@ def test_get_record_tag_name():
             files=[],
         )
         name = calkit.kits.get_record_tag_name(b"kit", manifest, "2026-11-27")
-        assert name.startswith("calkit/")
+        assert name.startswith("kit/")
         assert name.endswith(
             "/2026-11-27-" + hashlib.sha256(b"kit").hexdigest()[:7]
         )

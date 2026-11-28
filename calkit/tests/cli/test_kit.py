@@ -31,7 +31,7 @@ def test_create(kit_project, monkeypatch, tmp_path):
     assert calkit.kits.read("figures/fig.png") is None
     # It's recorded as a tag at its commit, pushed with that commit, without
     # changing the project's files
-    assert "Recorded as tag calkit/figures/fig.png/" in res.stdout
+    assert "Recorded as tag kit/figures/fig.png/" in res.stdout
     records = calkit.kits.get_records()
     assert len(records) == 1
     assert records[0]["artifact_path"] == "figures/fig.png"

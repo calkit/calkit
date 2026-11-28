@@ -1,13 +1,13 @@
 {
   "import-hill-roberts": {
-    "start_time": "2026-11-28T01:22:30.978000",
-    "end_time": "2026-11-28T01:22:33.314000",
+    "start_time": "2026-11-28T01:27:58.752000",
+    "end_time": "2026-11-28T01:28:01.108000",
     "environment": "main",
-    "git_rev": "2786823d3482b7df0fe25f77a43412390b1fae1c",
-    "git_dirty": true,
-    "dvc_lock_hash": "sha256:89446b8df6ceacb665a33e0c7395fd784342ff6331e2b055fdfedf09f7c77327",
-    "calkit_version": "0.53.2.dev14+g2786823d3",
-    "calkit_git_rev": "2786823d3482b7df0fe25f77a43412390b1fae1c",
+    "git_rev": "928b1118a30eb7c26b20226dc738827bbb49eda6",
+    "git_dirty": false,
+    "dvc_lock_hash": "sha256:372e72f58cab44d26775c059773eeb24064bfa7a6a0a5761fbce07c78b893d84",
+    "calkit_version": "0.53.2.dev15+g928b1118a",
+    "calkit_git_rev": "928b1118a30eb7c26b20226dc738827bbb49eda6",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",

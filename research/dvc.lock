@@ -72,8 +72,8 @@ stages:
       size: 5
     - path: scripts/import-dataverse-file.py
       hash: md5
-      md5: 551090ec4788ec48c225956eeaa1b0b1
-      size: 2704
+      md5: baf4f75482bb45e3a8f8b3f2ca7da767
+      size: 2679
     - path: uv.lock
       hash: md5
       md5: 63a043152c18580990584c2cf682d069

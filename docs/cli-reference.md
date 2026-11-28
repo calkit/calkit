@@ -3092,6 +3092,7 @@ Share figures and documents that carry what made them (calkits).
 | [`expand`](#subcommand-kit-expand) | Expand the calkit embedded in a file into a project.                                             |
 | [`run`](#subcommand-kit-run)       | Expand the calkit embedded in a file, rerun its pipeline, and check the file comes out the same. |
 | [`open`](#subcommand-kit-open)     | Open the project a file's calkit came from.                                                      |
+| [`list`](#subcommand-kit-list)     | List the calkits created from this project, newest first.                                        |
 
 <a id="subcommand-kit-create"></a>
 
@@ -3100,6 +3101,8 @@ Share figures and documents that carry what made them (calkits).
 Write a copy of a figure or document with a calkit embedded.
 
 The calkit holds what makes the file (stages, scripts, environments, and data that fits) so anyone with the copy can see what made it with 'calkit describe', and expand or rerun it with 'calkit kit expand' or 'calkit kit run'. Works with PNG, PDF, SVG, and HTML files.
+
+It's recorded as a Git tag at the commit it came from, which is pushed, so 'calkit kit list' shows what's been shared and the commit stays available.
 
 Usage:
 
@@ -3120,7 +3123,8 @@ Options:
 | `--output`, `-o`       | str     | no       |         | Where to write the copy; defaults to NAME.calkit.EXT here.                                                                                    |
 | `--max-size`           | str     | no       |         | Largest the calkit may grow, e.g., 500KB or 20MB; data that doesn't fit is left out. Defaults to the file's size or 1MB, whichever is bigger. |
 | `--no-data`            | boolean | no       | False   | Leave out all data, so the calkit holds only the recipe.                                                                                      |
-| `--force`, `-f`        | boolean | no       | False   | Create it even if the pipeline is out of date.                                                                                                |
+| `--force`, `-f`        | boolean | no       | False   | Create it even if the pipeline is out of date or there are uncommitted changes, which leave it unrecorded.                                    |
+| `--no-record`          | boolean | no       | False   | Don't record it as a Git tag, or push that tag.                                                                                               |
 | `--to-clipboard`, `-c` | boolean | no       | False   | Copy it to the clipboard, to paste into a chat or email.                                                                                      |
 
 <a id="subcommand-kit-expand"></a>
@@ -3198,6 +3202,26 @@ Options:
 | -------------- | ------- | -------- | ------- | -------------------------------------------------------- |
 | `--hub`        | boolean | no       | False   | Open its project on the hub, at the commit it came from. |
 | `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default.           |
+
+<a id="subcommand-kit-list"></a>
+
+#### `calkit kit list`
+
+List the calkits created from this project, newest first.
+
+Read from the tags 'calkit kit create' records, so fetch tags first, e.g., with 'git fetch --tags', to see those others created.
+
+Usage:
+
+```text
+calkit kit list [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description    |
+| -------- | ------- | -------- | ------- | -------------- |
+| `--json` | boolean | no       | False   | Print as JSON. |
 
 <a id="command-group-office"></a>
 

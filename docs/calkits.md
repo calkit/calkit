@@ -20,6 +20,15 @@ The original is left alone.
 The copy opens like any other PNG.
 Add `--to-clipboard` to copy it, as a file, to paste into a chat or email.
 
+Each calkit is recorded as a Git tag, e.g.,
+`calkit/figures/plot.png/2026-11-27-1a2b3c4`,
+at the commit it came from, and the tag is pushed,
+so the project keeps track of what's been shared
+without any of its files changing,
+and the commit stays available to whoever has the calkit.
+`calkit kit list` lists them.
+Use `--no-record` to skip that.
+
 The calkit holds the stage that makes the figure,
 every stage upstream of it,
 the scripts and environment specs they use,
@@ -33,10 +42,11 @@ Whatever is left out is still listed, with its hash,
 so an expanded copy can fetch it from the project's storage
 or remake it by running the pipeline.
 
-The pipeline must be up to date, since a calkit records how the file was
-made.
-Use `--force` to create one anyway; the calkit says it was out of date.
-Changes that aren't committed are recorded too.
+The pipeline must be up to date and committed,
+since a calkit records how the file was made.
+Use `--force` to create one anyway;
+the calkit says it was out of date and lists uncommitted changes,
+and one with uncommitted changes isn't recorded.
 
 Calkits leave out what describes your machine or isn't needed to run the
 pipeline, e.g., Overleaf sync state and comments,

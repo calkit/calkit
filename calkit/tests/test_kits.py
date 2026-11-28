@@ -118,7 +118,7 @@ def test_build_read_expand(kit_project, tmp_path):
         with open(path, "rb") as f:
             original = f.read()
         out_path = str(tmp_path / os.path.basename(path))
-        manifest = calkit.kits.write_copy(path, out_path, up_to_date=True)
+        _, manifest = calkit.kits.write_copy(path, out_path, up_to_date=True)
         kit = calkit.kits.read(out_path)
         assert kit is not None
         assert kit.artifact == original
@@ -536,3 +536,21 @@ def test_scrub():
         "outs": [("figs/f.png", "b")],
     }
     assert stage_io["each@1"]["outs"] == [("sub/out.txt", "c")]
+
+
+def test_get_record_tag_name():
+    for path in ["figures/plot.png", ".hidden/a b..c.lock/x:y?.png"]:
+        manifest = calkit.kits.Manifest(
+            created_with="test",
+            artifact=calkit.kits.KitArtifact(
+                path=path, size=1, sha256="0" * 64, stage="s"
+            ),
+            source=calkit.kits.KitSource(up_to_date=True),
+            files=[],
+        )
+        name = calkit.kits.get_record_tag_name(b"kit", manifest, "2026-11-27")
+        assert name.startswith("calkit/")
+        assert name.endswith(
+            "/2026-11-27-" + hashlib.sha256(b"kit").hexdigest()[:7]
+        )
+        subprocess.check_call(["git", "check-ref-format", f"refs/tags/{name}"])

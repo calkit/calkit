@@ -1,10 +1,12 @@
 """Tests for ``calkit.cli.kit``."""
 
+import hashlib
 import io
 import os
 import subprocess
 import zipfile
 
+import git
 from typer.testing import CliRunner
 
 import calkit.hub
@@ -14,7 +16,11 @@ from calkit.cli.main import app
 runner = CliRunner()
 
 
-def test_create(kit_project, monkeypatch):
+def test_create(kit_project, monkeypatch, tmp_path):
+    remote = tmp_path / "remote.git"
+    subprocess.check_call(["git", "init", "-q", "--bare", str(remote)])
+    subprocess.check_call(["git", "remote", "set-url", "origin", str(remote)])
+    head_sha = git.Repo().head.commit.hexsha
     # Written beside where it's run, leaving the original alone
     res = runner.invoke(app, ["kit", "create", "figures/fig.png"])
     assert res.exit_code == 0, res.stdout
@@ -23,6 +29,30 @@ def test_create(kit_project, monkeypatch):
     assert kit is not None
     assert kit.manifest.source.up_to_date
     assert calkit.kits.read("figures/fig.png") is None
+    # It's recorded as a tag at its commit, pushed with that commit, without
+    # changing the project's files
+    assert "Recorded as tag calkit/figures/fig.png/" in res.stdout
+    records = calkit.kits.get_records()
+    assert len(records) == 1
+    assert records[0]["artifact_path"] == "figures/fig.png"
+    assert records[0]["commit_sha"] == head_sha
+    assert records[0]["calkit_sha256"] == hashlib.sha256(kit.kit).hexdigest()
+    tag_name = records[0]["name"]
+    assert git.Repo().commit(tag_name).hexsha == head_sha
+    assert not git.Repo().is_dirty()
+    remote_tags = subprocess.check_output(
+        ["git", "ls-remote", "--tags", str(remote)], text=True
+    )
+    assert f"refs/tags/{tag_name}" in remote_tags
+    res = runner.invoke(app, ["kit", "list"])
+    assert res.exit_code == 0, res.stdout
+    assert f"figures/fig.png at {head_sha[:7]}" in res.stdout
+    assert tag_name in res.stdout
+    res = runner.invoke(
+        app, ["kit", "create", "figures/fig.svg", "--no-record"]
+    )
+    assert res.exit_code == 0, res.stdout
+    assert len(calkit.kits.get_records()) == 1
     # Data that doesn't fit is left out and reported
     res = runner.invoke(
         app,
@@ -55,7 +85,10 @@ def test_create(kit_project, monkeypatch):
     kit = calkit.kits.read("a.png")
     assert kit is not None
     assert not kit.manifest.source.up_to_date
-    assert "Uncommitted changes" in res.stdout + str(res.stderr)
+    assert "isn't recorded" in res.stdout + str(res.stderr)
+    # Only the calkits created normally are recorded
+    paths = [r["artifact_path"] for r in calkit.kits.get_records()]
+    assert sorted(paths) == ["figures/fig.pdf", "figures/fig.png"]
     subprocess.check_call(["dvc", "checkout", "-q", "--force", "data/raw.csv"])
     # Copied to the clipboard as a file
     copied = []

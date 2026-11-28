@@ -279,6 +279,7 @@ DVC handles:
 | `calkit kit expand <file>`      | Expand a file's calkit into a project                   |
 | `calkit kit run <file>`         | Expand, rerun, and check the file comes out the same    |
 | `calkit kit open <file>`        | Open a calkit's project in an editor, or `--hub`        |
+| `calkit kit list`               | List calkits created from this project                  |
 
 ## `calkit xr`: The fastest path to a reproducible stage
 

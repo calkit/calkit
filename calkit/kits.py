@@ -871,8 +871,15 @@ def write_copy(
     max_size: int | None = None,
     include_data: bool = True,
     ck_info: dict | None = None,
-) -> Manifest:
-    """Write a copy of an artifact with its calkit embedded."""
+    allow_uncommitted: bool = True,
+) -> tuple[bytes, Manifest]:
+    """Write a copy of an artifact with its calkit embedded, returning the
+    calkit and its manifest.
+
+    Without ``allow_uncommitted``, raises ``KitError`` before writing if any
+    file in the calkit has uncommitted changes, since it then matches no
+    commit.
+    """
     with open(path, "rb") as f:
         data = f.read()
     fmt = get_format(data, path)
@@ -888,10 +895,15 @@ def write_copy(
         include_data=include_data,
         ck_info=ck_info,
     )
+    if manifest.source.uncommitted_paths and not allow_uncommitted:
+        raise KitError(
+            "Uncommitted changes: "
+            + ", ".join(manifest.source.uncommitted_paths)
+        )
     os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
     with open(dest_path, "wb") as f:
         f.write(embed(data, path, kit))
-    return manifest
+    return kit, manifest
 
 
 def read(path: str) -> EmbeddedKit | None:
@@ -1090,3 +1102,88 @@ def get_hub_file_url(manifest: Manifest) -> str | None:
     if manifest.source.commit_sha:
         query["ref"] = manifest.source.commit_sha
     return f"{manifest.source.hub_url}/files?{urlencode(query)}"
+
+
+def get_record_tag_name(kit: bytes, manifest: Manifest, date: str) -> str:
+    """Get the name of the tag recording a calkit, e.g.,
+    ``calkit/figures/plot.png/2026-11-27-1a2b3c4``, which is unique to the
+    calkit and valid as a Git ref.
+    """
+    parts = []
+    for part in manifest.artifact.path.split("/"):
+        part = re.sub(r"[^A-Za-z0-9._-]+", "-", part).replace("..", "-")
+        part = part.lstrip(".").removesuffix(".lock") or "-"
+        parts.append(part)
+    kit_sha256 = hashlib.sha256(kit).hexdigest()
+    return f"calkit/{'/'.join(parts)}/{date}-{kit_sha256[:7]}"
+
+
+def record(kit: bytes, manifest: Manifest) -> str:
+    """Record that a calkit was created, as an annotated Git tag at the
+    commit it came from, returning the tag's name.
+
+    A tag changes nothing in the project's files, keeps the commit from
+    being lost to a squash or rebase, and pushing it uploads the commit
+    too. Its message is a line saying what it is, then a JSON record.
+    """
+    import calkit
+    import calkit.git
+
+    if manifest.source.commit_sha is None:
+        raise KitError("Calkit has no commit to record it at")
+    created = calkit.utcnow()
+    name = get_record_tag_name(kit, manifest, created.date().isoformat())
+    info = {
+        "artifact_path": manifest.artifact.path,
+        "artifact_sha256": manifest.artifact.sha256,
+        "calkit_sha256": hashlib.sha256(kit).hexdigest(),
+        "commit_sha": manifest.source.commit_sha,
+        "up_to_date": manifest.source.up_to_date,
+        "created": created.isoformat(),
+        "created_with": manifest.created_with,
+    }
+    message = (
+        f"Calkit of {manifest.artifact.path}\n\n"
+        + json.dumps(info, indent=2)
+        + "\n"
+    )
+    calkit.git.get_repo().git.tag(
+        "-a", name, manifest.source.commit_sha, "-m", message
+    )
+    return name
+
+
+def push_record(tag_name: str, remote: str = "origin") -> None:
+    """Push the tag recording a calkit, which uploads its commit too."""
+    subprocess.run(
+        ["git", "push", remote, f"refs/tags/{tag_name}"],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+
+def get_records() -> list[dict]:
+    """Get the records of calkits created from this project, newest first,
+    from its tags, each with the tag's ``name``.
+    """
+    import calkit.git
+
+    out = calkit.git.get_repo().git.for_each_ref(
+        "refs/tags/calkit/",
+        "--sort=-creatordate",
+        "--format=%(refname:strip=2)%00%(contents)%1e",
+    )
+    records = []
+    for entry in out.split("\x1e"):
+        name, _, contents = entry.strip("\n").partition("\x00")
+        if not name:
+            continue
+        try:
+            info = json.loads(contents.split("\n", 2)[2])
+        except (IndexError, ValueError):
+            continue
+        if isinstance(info, dict):
+            records.append({"name": name} | info)
+    return records

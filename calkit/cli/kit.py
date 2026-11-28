@@ -72,7 +72,17 @@ def create(
         typer.Option(
             "--force",
             "-f",
-            help="Create it even if the pipeline is out of date.",
+            help=(
+                "Create it even if the pipeline is out of date or there are "
+                "uncommitted changes, which leave it unrecorded."
+            ),
+        ),
+    ] = False,
+    no_record: Annotated[
+        bool,
+        typer.Option(
+            "--no-record",
+            help="Don't record it as a Git tag, or push that tag.",
         ),
     ] = False,
     to_clipboard: Annotated[
@@ -90,6 +100,10 @@ def create(
     data that fits) so anyone with the copy can see what made it with
     'calkit describe', and expand or rerun it with 'calkit kit expand' or
     'calkit kit run'. Works with PNG, PDF, SVG, and HTML files.
+
+    It's recorded as a Git tag at the commit it came from, which is pushed,
+    so 'calkit kit list' shows what's been shared and the commit stays
+    available.
     """
     import calkit.kits
     import calkit.pipeline
@@ -134,13 +148,14 @@ def create(
     if os.path.abspath(output) == os.path.abspath(path):
         raise_error("Output would overwrite the original")
     try:
-        manifest = calkit.kits.write_copy(
+        kit, manifest = calkit.kits.write_copy(
             path,
             output,
             up_to_date=not status.is_stale,
             max_size=None if max_size is None else parse_size(max_size),
             include_data=not no_data,
             ck_info=ck_info,
+            allow_uncommitted=force,
         )
     except ValueError as e:
         raise_error(str(e))
@@ -159,9 +174,28 @@ def create(
         )
     if manifest.source.uncommitted_paths:
         warn(
-            "Uncommitted changes, so calkit won't match any commit: "
-            + ", ".join(manifest.source.uncommitted_paths)
+            "Uncommitted changes, so calkit matches no commit and isn't "
+            "recorded: " + ", ".join(manifest.source.uncommitted_paths)
         )
+    elif not no_record and manifest.source.commit_sha:
+        try:
+            tag_name = calkit.kits.record(kit, manifest)
+        except Exception as e:
+            warn(f"Couldn't record calkit: {e}")
+        else:
+            if "origin" in manifest.source.git_remotes:
+                try:
+                    calkit.kits.push_record(tag_name)
+                except Exception as e:
+                    stderr = getattr(e, "stderr", "") or str(e)
+                    warn(
+                        f"Recorded as tag {tag_name}, but couldn't push it: "
+                        + stderr.strip()
+                    )
+                else:
+                    typer.echo(f"Recorded as tag {tag_name}")
+            else:
+                typer.echo(f"Recorded as tag {tag_name} (no remote)")
     if not manifest.source.git_remotes:
         warn("No Git remote, so history can't be fetched from the calkit")
     if to_clipboard:
@@ -362,3 +396,34 @@ def open_(
         yes=False,
         hub=None,
     )
+
+
+@kit_app.command(name="list")
+def list_(
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print as JSON.")
+    ] = False,
+) -> None:
+    """List the calkits created from this project, newest first.
+
+    Read from the tags 'calkit kit create' records, so fetch tags first,
+    e.g., with 'git fetch --tags', to see those others created.
+    """
+    import calkit.kits
+    from calkit.cli import echo_json
+
+    records = calkit.kits.get_records()
+    if as_json:
+        echo_json(records)
+        return
+    if not records:
+        typer.echo("No calkits recorded")
+        return
+    for r in records:
+        created = str(r.get("created", ""))[:10]
+        commit = str(r.get("commit_sha", ""))[:7]
+        stale = "" if r.get("up_to_date", True) else " (out of date)"
+        typer.echo(
+            f"{created}  {r.get('artifact_path')} at {commit}{stale}  "
+            f"{r['name']}"
+        )

@@ -36,14 +36,13 @@
     }
   },
   "find-calkit-papers": {
-    "start_time": "2026-11-27T16:30:04.478000",
-    "end_time": "2026-11-27T16:30:10.296000",
-    "environment": "dev",
-    "git_rev": "b920397c368e43f2bdd286934c6fb047260026a3",
+    "start_time": "2026-11-28T08:07:30.680000",
+    "end_time": "2026-11-28T08:07:38.426000",
+    "git_rev": "4718ca51d76e1d77b4b5d6c582167d697421203d",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:78813443e14589fe4aa112bae1019988973092666657cac40636a9a49864fa93",
-    "calkit_version": "0.53.2.dev6+gb920397c",
-    "calkit_git_rev": "b920397c368e43f2bdd286934c6fb047260026a3",
+    "dvc_lock_hash": "sha256:f162389a6c6723ffec93b31baaa39f9b91c5a3e254e21ec7f5f4efad285aae2d",
+    "calkit_version": "0.53.2.dev16+g4718ca51",
+    "calkit_git_rev": "4718ca51d76e1d77b4b5d6c582167d697421203d",
     "system": {
       "machine_id": "ca28fd2600df4422aa47c00aa83b8a79",
       "os": "Linux",
@@ -55,14 +54,13 @@
     }
   },
   "find-calkit-projects": {
-    "start_time": "2026-11-27T16:24:38.989000",
-    "end_time": "2026-11-27T16:30:04.478000",
-    "environment": "dev",
-    "git_rev": "b920397c368e43f2bdd286934c6fb047260026a3",
+    "start_time": "2026-11-28T07:51:45.925000",
+    "end_time": "2026-11-28T08:07:30.680000",
+    "git_rev": "4718ca51d76e1d77b4b5d6c582167d697421203d",
     "git_dirty": false,
-    "dvc_lock_hash": "sha256:a34851671adf11d78b4a7555b1a94862675a0767a9fcf3be6c7d30404bd9d26d",
-    "calkit_version": "0.53.2.dev6+gb920397c",
-    "calkit_git_rev": "b920397c368e43f2bdd286934c6fb047260026a3",
+    "dvc_lock_hash": "sha256:d1f65a2743c10698dbbfbafe984c15b051ba1b88c6334ccd79311fc375f752e1",
+    "calkit_version": "0.53.2.dev16+g4718ca51",
+    "calkit_git_rev": "4718ca51d76e1d77b4b5d6c582167d697421203d",
     "system": {
       "machine_id": "ca28fd2600df4422aa47c00aa83b8a79",
       "os": "Linux",
@@ -167,21 +165,21 @@
     }
   },
   "one-pager/pdf": {
-    "start_time": "2026-11-28T04:12:18.477000",
-    "end_time": "2026-11-28T04:12:24.360000",
-    "git_rev": "aef853eb95bb2be836e39b906a86cc8efda2f74b",
+    "start_time": "2026-11-28T08:07:45.986000",
+    "end_time": "2026-11-28T08:07:49.426000",
+    "git_rev": "4718ca51d76e1d77b4b5d6c582167d697421203d",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:71cd716e382480402738127863f68ba3ed73c88d066521a97f04def87445473c",
-    "calkit_version": "0.53.2.dev17+gaef853eb9",
-    "calkit_git_rev": "aef853eb95bb2be836e39b906a86cc8efda2f74b",
+    "dvc_lock_hash": "sha256:efe4f84e29990bce14ba253a4dab98ca2e6b8faace0505f914c359690928e886",
+    "calkit_version": "0.53.2.dev16+g4718ca51",
+    "calkit_git_rev": "4718ca51d76e1d77b4b5d6c582167d697421203d",
     "system": {
-      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
-      "os": "Darwin",
-      "os_version": "27.2.0",
-      "machine": "arm64",
-      "processor": "arm",
-      "cpu_count": 10,
-      "memory_gb": 64.0
+      "machine_id": "ca28fd2600df4422aa47c00aa83b8a79",
+      "os": "Linux",
+      "os_version": "7.0.0-1020-azure",
+      "machine": "x86_64",
+      "processor": "",
+      "cpu_count": 4,
+      "memory_gb": 15.6
     }
   },
   "research-flow": {
@@ -221,14 +219,14 @@
     }
   },
   "traction": {
-    "start_time": "2026-11-27T16:30:13.468000",
-    "end_time": "2026-11-27T16:30:15.511000",
-    "environment": "dev",
-    "git_rev": "b920397c368e43f2bdd286934c6fb047260026a3",
+    "start_time": "2026-11-28T08:07:42.006000",
+    "end_time": "2026-11-28T08:07:44.106000",
+    "environment": "pipeline",
+    "git_rev": "4718ca51d76e1d77b4b5d6c582167d697421203d",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:4f8841ac0cd47e92de76f458720fc261b84c641d61151bb657c7f96d6c676b3d",
-    "calkit_version": "0.53.2.dev6+gb920397c",
-    "calkit_git_rev": "b920397c368e43f2bdd286934c6fb047260026a3",
+    "dvc_lock_hash": "sha256:184b7254ede9ef51aeccc24a528a3bb46d92f10daf61b421eeb3c960718c7cd3",
+    "calkit_version": "0.53.2.dev16+g4718ca51",
+    "calkit_git_rev": "4718ca51d76e1d77b4b5d6c582167d697421203d",
     "system": {
       "machine_id": "ca28fd2600df4422aa47c00aa83b8a79",
       "os": "Linux",

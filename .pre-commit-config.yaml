@@ -88,9 +88,10 @@ repos:
         # long 'desc:' value goes, so formatting it here just means the two
         # take turns reformatting the same file.
         # Likewise results files, here, in the example projects, and in
-        # decisions, which are stage outputs and have to match what the stage
-        # wrote byte for byte.
-        exclude: calkit|^hub/|(^|/)dvc\.yaml$|^((examples/.*|decisions)/)?results/
+        # decisions and research, which are stage outputs and have to match
+        # what the stage wrote byte for byte, and research/audit-speed, which
+        # records what a study ran.
+        exclude: calkit|^hub/|(^|/)dvc\.yaml$|^((examples/.*|decisions|research)/)?results/|^research/audit-speed/
 
   - repo: local
     hooks:

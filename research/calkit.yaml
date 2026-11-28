@@ -1,0 +1,456 @@
+name: research
+title: Research
+description: >-
+  Product research for Calkit: what would get researchers to adopt it,
+  which problems in an analysis change its conclusions, who finds them, and
+  what would catch them, run in studies and rounds that add to the record
+  rather than replace it.
+
+questions:
+  # TODO: needs human review
+  - question: >-
+      What would get researchers to adopt Calkit, with reproducibility as a
+      side effect?
+    hypothesis: >-
+      Question-driven development with a coding agent, like test-driven
+      development for research: a person writes a question with its
+      hypothesis and approach, an agent builds the pipeline and evidence
+      that answer it, and the person reviews the approach, checks the
+      outputs, and signs off; when inputs change, the answer goes stale and
+      the question is open again.
+    approach: >-
+      At a workshop, each participant takes one question about their own
+      data through that loop with an agent in Calkit, compared with asking
+      the agent to make a figure, and is interviewed on the alternatives:
+      figures and numbers that update themselves (revisions without the
+      redo), others being able to use the research (installable packages),
+      and running on a cluster from a laptop.
+    notes: >-
+      Not yet tested. Open until the workshop in
+      adoption/workshop-protocol.md is run and its sessions are summarized
+      by a stage.
+
+  - question: >-
+      With unlimited reading, do agent auditors need a research tool to find
+      the bugs in a small analysis?
+    answer:
+      if r1_found == r1_runs and r2_merge == r2_merge_n and r2_fastest == "none": >-
+        No. In round 1, each of the {r1_runs} auditors, one per tool, found
+        the planted bug, in {r1_min_s:.0f} to {r1_max_s:.0f} s, from the
+        same giveaway: the report says participants with missing SES were
+        excluded, yet its sample is everyone enrolled. In round 2, with
+        subtler bugs and {r2_min_runs} audits per arm, all {r2_merge_n}
+        auditors found the merge that silently dropped a site, and the arm
+        with no framework or version control was fastest (mean {none_s:.0f}
+        s, against Calkit {calkit_s:.0f} s, ASTRA {astra_s:.0f} s, and
+        OpenResearch {orx_s:.0f} s). The arms differed only on the bug in
+        the model's reference level (Calkit {calkit_ref}/{calkit_ref_n},
+        ASTRA {astra_ref}/{astra_ref_n}, no framework
+        {none_ref}/{none_ref_n}, OpenResearch {orx_ref}/{orx_ref_n}), too
+        few runs to call. Calkit kept a stale number out of the report by
+        filling numbers in from results; in every other arm, auditors found
+        it by matching numbers to files by hand.
+      else: >-
+        Not settled; see results/audit-speed.md for every run.
+    evidence:
+      - kind: result
+        path: results/audit-speed.json
+        values:
+          r1_runs: rounds.1.n_runs
+          r1_found: rounds.1.n_found_bug
+          r1_min_s: rounds.1.seconds.min
+          r1_max_s: rounds.1.seconds.max
+          r2_min_runs: rounds.2.min_runs_per_arm
+          r2_merge: rounds.2.found.merge.found
+          r2_merge_n: rounds.2.found.merge.possible
+          r2_fastest: rounds.2.fastest_arm
+          none_s: rounds.2.arms.none.mean_seconds
+          calkit_s: rounds.2.arms.calkit.mean_seconds
+          astra_s: rounds.2.arms.astra.mean_seconds
+          orx_s: rounds.2.arms.openresearch.mean_seconds
+          none_ref: rounds.2.arms.none.found.reference_level.found
+          none_ref_n: rounds.2.arms.none.found.reference_level.possible
+          calkit_ref: rounds.2.arms.calkit.found.reference_level.found
+          calkit_ref_n: rounds.2.arms.calkit.found.reference_level.possible
+          astra_ref: rounds.2.arms.astra.found.reference_level.found
+          astra_ref_n: rounds.2.arms.astra.found.reference_level.possible
+          orx_ref: rounds.2.arms.openresearch.found.reference_level.found
+          orx_ref_n: rounds.2.arms.openresearch.found.reference_level.possible
+      - kind: table
+        path: results/audit-speed.md
+
+  - question: >-
+      At human reading speed, which problems in a small analysis do agent
+      auditors miss?
+    answer:
+      if v2_merge == 0 and v2_stale == v2_stale_n and v2_min < v2_budget and v1_merge == rec_merge: >-
+        The silent row loss. Reading through a tool that charges a person's
+        time, with realistic costs (a {v2_budget} min budget, code read at
+        {v2_code} lines per min, and {v2_script} min to write a script of
+        one's own), none of the {v2_merge_n} auditors, one per arm, caught
+        the merge that dropped a site. They matched numbers to saved
+        outputs or reran the authors' pipeline, which reproduces the bug,
+        and stopped with time left (mean {v2_min:.1f} min). Cheap checks
+        still got done: the stale typed number was found in
+        {v2_stale}/{v2_stale_n} arms where it could occur, and the wrong
+        reference level, visible in the code, in {v2_ref}/{v2_ref_n}. With
+        scripts cheaper to write ({v1_script} min), the row loss was found
+        only by auditors who recomputed results with their own scripts
+        ({rec_merge} of {rec_n}).
+      else: >-
+        Not settled; see results/audit-speed.md for every run.
+    evidence:
+      - kind: result
+        path: results/audit-speed.json
+        values:
+          v2_budget: rounds.3.settings.v2.costs.budget_min
+          v2_code: rounds.3.settings.v2.costs.code_lines_per_min
+          v2_script: rounds.3.settings.v2.costs.own_script_min
+          v2_merge: rounds.3.settings.v2.found.merge.found
+          v2_merge_n: rounds.3.settings.v2.found.merge.possible
+          v2_min: rounds.3.settings.v2.mean_simulated_minutes
+          v2_stale: rounds.3.settings.v2.found.stale_number.found
+          v2_stale_n: rounds.3.settings.v2.found.stale_number.possible
+          v2_ref: rounds.3.settings.v2.found.reference_level.found
+          v2_ref_n: rounds.3.settings.v2.found.reference_level.possible
+          v1_script: rounds.3.settings.v1.costs.own_script_min
+          v1_merge: rounds.3.settings.v1.found.merge.found
+          rec_n: rounds.3.checked_by.recomputed with own scripts.n_runs
+          rec_merge: rounds.3.checked_by.recomputed with own scripts.found.merge.found
+      - kind: table
+        path: results/audit-speed.md
+
+  - question: >-
+      Do agent auditors catch the data problems that changed conclusions in
+      published work?
+    answer:
+      if hr_n - hr_found == 1 and m_leak == 0 and m_n == 2: >-
+        Not reliably, even with unlimited reading. In Hill & Roberts
+        (2023), {edu_n} of {edu_nv:,} respondents' education is coded
+        {edu_code} (the survey platform's "none of the above") and used as
+        a continuous covariate; dropping them reverses the association
+        between education and acquiescence (corrigendum
+        doi:10.1017/pan.2024.27). {hr_found} of {hr_n} auditors found it;
+        the other never tabulated the raw education values. In Muchlinski
+        et al. (2016), {m_fig}/{m_n} found the ROC figure's AUC disagreeing
+        with the text (Wang 2019), but {m_leak}/{m_n} found the leak that
+        Kapoor & Narayanan (2023) show erases the random forest's advantage
+        over logistic regression: imputation fit on training and test data
+        together. The imputation step isn't in the package, and both
+        auditors flagged it as missing.
+      else: >-
+        Not settled; see results/real-packages.md for every run.
+    evidence:
+      - kind: result
+        path: results/real-packages.json
+        values:
+          hr_found: packages.hill-roberts-2023.found.sentinel
+          hr_n: packages.hill-roberts-2023.n_runs
+          m_fig: packages.muchlinski-2016.found.figure_mismatch
+          m_leak: packages.muchlinski-2016.found.leakage
+          m_n: packages.muchlinski-2016.n_runs
+      - kind: result
+        path: results/hill-roberts-profile.json
+        values:
+          edu_n: files.data/LucidWideFile.csv.flags.education.0.n
+          edu_nv: files.data/LucidWideFile.csv.flags.education.0.n_values
+          edu_code: files.data/LucidWideFile.csv.flags.education.0.examples.0
+      - kind: table
+        path: results/real-packages.md
+
+  - question: >-
+      Would an automatic data profile have surfaced the problems auditors
+      missed?
+    answer:
+      if n_files_flagged == 1 and edu_n > 0 and lucid_edu_n == edu_n: >-
+        For the sentinel code, yes. Two generic rules per numeric column,
+        knowing nothing about the answer (a few negatives in an otherwise
+        non-negative column, and values far outside the 1st-99th percentile
+        span), raised {n_flags} flags in {n_columns} columns, all in
+        {n_files_flagged} of the archive's {n_files} files: the {edu_code}
+        code in education and lucid_education ({edu_n} values each), and
+        {hhi_code} in lucid_hhi ({hhi_n} values), not in the corrigendum's
+        summary and not yet confirmed as a problem. These rules can't see the
+        other two problems. Muchlinski et al.'s leakage is in an imputation
+        step the package doesn't include, and round 3's dropped site is a
+        loss of rows, which needs row counts in and out of the merge, i.e.,
+        a profile at each stage boundary rather than of the inputs alone,
+        the part still to build.
+      else: >-
+        Not settled; see results/hill-roberts-profile.json.
+    evidence:
+      - kind: result
+        path: results/hill-roberts-profile.json
+        values:
+          n_files: n_files
+          n_files_flagged: n_files_flagged
+          n_columns: n_columns_flagged
+          n_flags: n_flags
+          edu_n: files.data/LucidWideFile.csv.flags.education.0.n
+          edu_code: files.data/LucidWideFile.csv.flags.education.0.examples.0
+          lucid_edu_n: files.data/LucidWideFile.csv.flags.lucid_education.0.n
+          hhi_n: files.data/LucidWideFile.csv.flags.lucid_hhi.0.n
+          hhi_code: files.data/LucidWideFile.csv.flags.lucid_hhi.0.examples.0
+
+  # TODO: needs human review
+  - question: >-
+      Which kinds of errors change conclusions in real research, and who
+      finds them?
+    answer:
+      if g_mod * 2 > g_spec and g_person * 2 > g_changed and g_prof_u < 0.15 and pe_prof_u < 0.15 and g_stale_c == 0 and pe_stale_c == 0 and ag_top == "spec_mismatch" and g_write == 0 and pe_write == 0 and ag_write > 0: >-
+        In published human research, mostly wrong models, formulas, and
+        readings of results, found by people rather than tools. Of the
+        {g_changed} errors that changed a conclusion in general research,
+        {g_spec} have a stated mechanism, and {g_mod} of those are
+        calculation errors, leakage, misread results, wrong variables, or
+        inference errors; in computational physics and engineering errata,
+        {pe_mod} of {pe_changed} are calculation or numerical-method
+        errors. In general research, {g_person} of the {g_changed} were
+        found by the authors, readers, or someone with domain knowledge;
+        rerunning code found {g_reran} and profiling data {g_profiled}.
+        Errors a generic data profile could catch (sentinel codes, merges,
+        and duplicate rows) are {g_prof:.0%} of general research's weighted
+        impact and {pe_prof:.0%} of the errata's, or {g_prof_u:.0%} and
+        {pe_prof_u:.0%} counting unit errors. Documented stale results are
+        nearly absent ({g_stale} in general research, {pe_stale} in the
+        errata, none changing a conclusion), but a stale result caught
+        before publication leaves no public record, so near-misses can't
+        appear here. In the agent sample, methods text that doesn't match
+        the code is the largest answer-changer ({ag_top_n} of {ag_changed}),
+        found mostly by reading the code ({ag_read} of {ag_changed}), and
+        errors introduced in writing, e.g., overclaiming and fabricated
+        results, changed or weakened conclusions only there ({ag_write}).
+        Caveats: the three samples aren't pooled, since each route selects
+        differently, so impact largely reflects the route, e.g., retractions
+        are nearly all answer-changing; the taxonomy added types per sample; and
+        every row was coded in a single AI pass from public documents,
+        {n_unsure} of {n_rows} at medium or low confidence.
+      else: >-
+        Not settled; see results/real-world-errors.md for each sample.
+    evidence:
+      - kind: result
+        path: results/real-world-errors.json
+        values:
+          n_rows: n_rows
+          n_unsure: n_low_or_medium_confidence
+          g_changed: samples.general.changed.n
+          g_spec: samples.general.changed.n_specified
+          g_mod: samples.general.changed.n_modeling
+          g_person: samples.general.changed.n_found_by_person
+          g_reran: samples.general.changed.by_how_found.reran_code
+          g_profiled: samples.general.changed.by_how_found.profiled_data
+          g_prof: samples.general.profile_catchable.core.share
+          g_prof_u: samples.general.profile_catchable.with_units.share
+          g_stale: samples.general.stale.n
+          g_stale_c: samples.general.stale.n_changed
+          g_write: samples.general.n_writing_stage
+          pe_changed: samples.physics_engineering.changed.n
+          pe_mod: samples.physics_engineering.changed.n_modeling
+          pe_prof: samples.physics_engineering.profile_catchable.core.share
+          pe_prof_u: samples.physics_engineering.profile_catchable.with_units.share
+          pe_stale: samples.physics_engineering.stale.n
+          pe_stale_c: samples.physics_engineering.stale.n_changed
+          pe_write: samples.physics_engineering.n_writing_stage
+          ag_changed: samples.agent.changed.n
+          ag_top: samples.agent.changed.top_type
+          ag_top_n: samples.agent.changed.top_type_n
+          ag_read: samples.agent.changed.by_how_found.read_code
+          ag_write: samples.agent.n_writing_stage
+      - kind: table
+        path: results/real-world-errors.md
+
+  # TODO: needs human review
+  - question: >-
+      What would catch the problems that change conclusions, including
+      those auditors skip?
+    answer:
+      if v2_merge == 0 and hr_found < hr_n and n_flags > 0 and g_prof_u < 0.15 and pe_prof_u < 0.15 and g_mod * 2 > g_spec and ag_top == "spec_mismatch": >-
+        Not settled, but a data profile alone isn't it. A profile recorded
+        at each stage boundary cheaply catches the problems auditors skip
+        because they need a look at the data itself: generic rules flagged
+        Hill & Roberts' sentinel code with no knowledge of it ({n_flags}
+        flags in all), which only {hr_found} of {hr_n} auditors found, and
+        row counts in and out of the merge would show round 3's dropped
+        site, which none of {v2_merge_n} auditors at reading speed caught.
+        In published research, though, that class is a small share of what
+        changes conclusions: {g_prof:.0%} of weighted impact in general
+        research and {pe_prof:.0%} in computational physics and engineering
+        errata ({g_prof_u:.0%} and {pe_prof_u:.0%} counting unit errors).
+        Most answer-changing errors there are in modeling, calculation, and
+        interpretation ({g_mod} of {g_spec} with a stated mechanism), found
+        by authors, readers, and domain experts ({g_person} of
+        {g_changed}).
+        So the larger lever is likely making the parameters and choices
+        behind each answer cheap for an expert to inspect and vary, and,
+        for agent work, checking that the methods text matches the
+        pipeline, since that mismatch is the largest answer-changer in the
+        agent sample ({ag_top_n} of {ag_changed}). Untested: whether either
+        helps experts find more, and whether auditors read a profile when
+        it's shown.
+      else: >-
+        Not settled; see the answers to the questions above.
+    evidence:
+      - kind: result
+        path: results/audit-speed.json
+        values:
+          v2_merge: rounds.3.settings.v2.found.merge.found
+          v2_merge_n: rounds.3.settings.v2.found.merge.possible
+      - kind: result
+        path: results/real-packages.json
+        values:
+          hr_found: packages.hill-roberts-2023.found.sentinel
+          hr_n: packages.hill-roberts-2023.n_runs
+      - kind: result
+        path: results/hill-roberts-profile.json
+        values:
+          n_flags: n_flags
+      - kind: result
+        path: results/real-world-errors.json
+        values:
+          g_changed: samples.general.changed.n
+          g_spec: samples.general.changed.n_specified
+          g_mod: samples.general.changed.n_modeling
+          g_person: samples.general.changed.n_found_by_person
+          g_prof: samples.general.profile_catchable.core.share
+          g_prof_u: samples.general.profile_catchable.with_units.share
+          pe_prof: samples.physics_engineering.profile_catchable.core.share
+          pe_prof_u: samples.physics_engineering.profile_catchable.with_units.share
+          ag_changed: samples.agent.changed.n
+          ag_top: samples.agent.changed.top_type
+          ag_top_n: samples.agent.changed.top_type_n
+
+environments:
+  main:
+    kind: uv
+    path: pyproject.toml
+    description: Python with pandas, for summarizing results and profiling data.
+
+pipeline:
+  stages:
+    summarize-audit-speed:
+      kind: python-script
+      script_path: scripts/summarize-audit-speed.py
+      environment: main
+      description: >-
+        Tabulate every round of the audit-speed study, so a new round only
+        adds its results file.
+      inputs:
+        - audit-speed/rounds
+      outputs:
+        - path: results/audit-speed.json
+          storage: git
+        - path: results/audit-speed.md
+          storage: git
+    summarize-real-packages:
+      kind: python-script
+      script_path: scripts/summarize-real-packages.py
+      environment: main
+      description: >-
+        Count which known problems agent audits of published replication
+        packages found.
+      inputs:
+        - real-packages/audits.json
+      outputs:
+        - path: results/real-packages.json
+          storage: git
+        - path: results/real-packages.md
+          storage: git
+    summarize-real-world-errors:
+      kind: python-script
+      script_path: scripts/summarize-real-world-errors.py
+      environment: main
+      description: >-
+        Tabulate the coded real-world errors by sample, never pooled: counts
+        by type and impact, where and how answer-changing errors arose and
+        were found, and the share a data profile could catch.
+      inputs:
+        - real-world-errors/errors.csv
+      outputs:
+        - path: results/real-world-errors.json
+          storage: git
+        - path: results/real-world-errors.md
+          storage: git
+    import-hill-roberts:
+      kind: python-script
+      frozen: true
+      script_path: scripts/import-dataverse-file.py
+      environment: main
+      description: >-
+        Download the Hill & Roberts (2023) replication archive as first
+        deposited (version 1.0, before the corrigendum), verifying the
+        checksum Dataverse reports. Frozen once run, since it needs the
+        network and the version can't change.
+      args:
+        - --doi=10.7910/DVN/TVJCTX
+        - --version=1.0
+        - --file-id=6558488
+        - --output=real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+        - --metadata-output=real-packages/hill-roberts-2023/dataverse.json
+      outputs:
+        - real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+        - path: real-packages/hill-roberts-2023/dataverse.json
+          storage: git
+    profile-hill-roberts:
+      kind: python-script
+      script_path: scripts/profile-data.py
+      environment: main
+      description: >-
+        Flag values outside each numeric column's pattern in every CSV of
+        the Hill & Roberts archive, with generic rules that know nothing
+        about its known problem.
+      args:
+        - real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+        - --output=results/hill-roberts-profile.json
+      inputs:
+        - from_stage_outputs: import-hill-roberts
+      outputs:
+        - path: results/hill-roberts-profile.json
+          storage: git
+
+datasets:
+  - path: real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+    title: Hill & Roberts (2023) replication archive, version 1.0
+    description: >-
+      The replication package for Hill & Roberts (2023), Political Analysis,
+      as first deposited, before the corrigendum (doi:10.1017/pan.2024.27).
+      CC0 1.0, per real-packages/hill-roberts-2023/dataverse.json.
+    stage: import-hill-roberts
+    imported_from:
+      url: https://dataverse.harvard.edu/api/access/datafile/6558488
+      date: 2026-11-27
+      description: >-
+        Harvard Dataverse doi:10.7910/DVN/TVJCTX, version 1.0, file
+        6558488.
+  - path: real-world-errors/errors.csv
+    title: Errors in research data analysis, a coded sample
+    description: >-
+      316 documented errors in published research and agent-made research,
+      from I4R replication reports, Retraction Watch, Kapoor & Narayanan's
+      leakage list, computational physics and engineering errata, and
+      evaluations of AI research agents, coded by an AI agent from public
+      documents. See real-world-errors/README.md.
+    created_by:
+      name: Pete Bachant
+      with_ai: Claude Opus 5.5
+
+tables:
+  - path: results/audit-speed.md
+    title: Audit speed by tool
+    description: >-
+      Each agent audit of a claim in the audit-speed study, by round and
+      tool: whether it found the planted bug, and how long it took.
+    stage: summarize-audit-speed
+  - path: results/real-packages.md
+    title: Agent audits of published replication packages
+    description: >-
+      Each agent audit of a published replication package with publicly
+      documented problems: which of them it found, and what else it raised.
+    stage: summarize-real-packages
+  - path: results/real-world-errors.md
+    title: Errors in published and agent research by type and impact
+    description: >-
+      Coded errors from published notices and reports, in three samples
+      kept apart (human-era general research, computational physics and
+      engineering errata, and agent-made research), by error type and
+      impact, with the share a data profile could catch.
+    stage: summarize-real-world-errors

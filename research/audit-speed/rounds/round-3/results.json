@@ -1,0 +1,117 @@
+{
+  "round": 3,
+  "date": "2026-11-27",
+  "task": "Same round 2 projects and claims, audited at human speed: every look at a project goes through hread, which charges simulated time and stops at a budget.",
+  "auditor": {
+    "kind": "agent",
+    "model": "claude-opus-5-5",
+    "constraint": "reader/hread.py; honor-based, each run logged in logs/<arm>-<n>.jsonl, where n is 1 for setting v1 and 2 for v2"
+  },
+  "settings": {
+    "v1": {
+      "budget_min": 20,
+      "prose_words_per_min": 240,
+      "code": "charged as prose",
+      "own_script_min": 2,
+      "run_cost_s": 20
+    },
+    "v2": {
+      "budget_min": 15,
+      "prose_words_per_min": 240,
+      "code_lines_per_min": 25,
+      "own_script_min": 10,
+      "run_cost_s": 20
+    }
+  },
+  "arms": {
+    "none": [
+      {
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "simulated_minutes": 12.4,
+        "checked_by": "recomputed with own scripts",
+        "setting": "v1"
+      },
+      {
+        "found": {
+          "merge": false,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "simulated_minutes": 9.0,
+        "checked_by": "reran the authors' pipeline, which reproduces their bug",
+        "setting": "v2"
+      }
+    ],
+    "calkit": [
+      {
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": null
+        },
+        "simulated_minutes": 14.5,
+        "checked_by": "recomputed with own scripts",
+        "setting": "v1"
+      },
+      {
+        "found": {
+          "merge": false,
+          "reference_level": true,
+          "stale_number": null
+        },
+        "simulated_minutes": 9.7,
+        "checked_by": "matched saved outputs",
+        "setting": "v2"
+      }
+    ],
+    "astra": [
+      {
+        "found": {
+          "merge": false,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "simulated_minutes": 13.9,
+        "checked_by": "matched saved outputs; refit for the reference level",
+        "setting": "v1"
+      },
+      {
+        "found": {
+          "merge": false,
+          "reference_level": false,
+          "stale_number": true
+        },
+        "simulated_minutes": 11.4,
+        "checked_by": "matched saved outputs",
+        "setting": "v2"
+      }
+    ],
+    "openresearch": [
+      {
+        "found": {
+          "merge": false,
+          "reference_level": false,
+          "stale_number": true
+        },
+        "simulated_minutes": 13.8,
+        "checked_by": "matched run records",
+        "setting": "v1"
+      },
+      {
+        "found": {
+          "merge": false,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "simulated_minutes": 8.8,
+        "checked_by": "matched run records",
+        "setting": "v2"
+      }
+    ]
+  },
+  "conclusion": "With realistic reading and scripting costs (v2), no arm caught the merge that silently dropped a site: auditors checked numbers against saved outputs or reran the pipeline, which reproduces the bug, and stopped early rather than spend time profiling data. Cheap checks got done: the stale number was found whenever it existed, and the reference level was usually caught by reading code."
+}

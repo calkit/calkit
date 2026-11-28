@@ -1,0 +1,7 @@
+117 author response to DP 116 (used to code impact/notes for I4R-116)
+123 opinion paper on rural electrification evidence; audits no specific paper
+124 multi-paper robustness study of 17 AER papers; its paper-level reports in this block are DPs 130-134, coded separately
+125 meta/methods paper on equivalence testing across 81 articles; no paper-level errors reported
+136 meta/methods paper on RDD manipulation tests across 36 publications; no paper-level errors reported
+141 meta-science paper on job market papers and p-hacking; audits no specific paper
+143 methods protocol for robustness reproductions; audits no specific paper

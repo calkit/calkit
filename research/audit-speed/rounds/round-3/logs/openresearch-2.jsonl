@@ -1,0 +1,12 @@
+{"t": 1795828187.3407612, "action": "run -- <scratch>/audit-compare/tools/openresearch/bin/orx project view", "words": 26, "cost_s": 26.5}
+{"t": 1795828191.827569, "action": "file ../orx-data/files/cognitive-training/cognitive-training/report.md 1 80", "words": 321, "cost_s": 80.2}
+{"t": 1795828197.4856682, "action": "run -- <scratch>/audit-compare/tools/openresearch/bin/orx exp status 6bf18710-9bad-4832-b2f6-15d992af4c66", "words": 136, "cost_s": 54.0}
+{"t": 1795828203.3763149, "action": "run -- <scratch>/audit-compare/tools/openresearch/bin/orx exp status 8aef98ff-7b04-478b-bee3-3f4617e957cb", "words": 137, "cost_s": 54.2}
+{"t": 1795828209.376558, "action": "run -- git ls-tree -r --name-only orx/corrected-sessions-export", "words": 11, "cost_s": 22.8}
+{"t": 1795828209.427826, "action": "run -- git diff --stat orx/baseline orx/corrected-sessions-export", "words": 15, "cost_s": 23.8}
+{"t": 1795828214.3289962, "action": "run -- git show orx/corrected-sessions-export:scripts/prepare_data.py", "words": 149, "cost_s": 57.2}
+{"t": 1795828219.189226, "action": "run -- git show orx/corrected-sessions-export:scripts/fit_model.py", "words": 186, "cost_s": 66.5}
+{"t": 1795828226.568097, "action": "run -- <scratch>/audit-compare/tools/openresearch/bin/orx exp status 28cf5b79-cd0a-4a21-8628-eada7ed47a59", "words": 129, "cost_s": 52.2}
+{"t": 1795828233.161518, "action": "run -- git diff orx/baseline orx/corrected-sessions-export -- codebook.md", "words": 87, "cost_s": 41.8}
+{"t": 1795828233.211682, "action": "run -- git diff orx/corrected-sessions-export orx/change-score -- run.sh codebook.md scripts", "words": 0, "cost_s": 20.0}
+{"t": 1795828245.836522, "action": "view ../orx-data/files/cognitive-training/cognitive-training/score_by_week.png", "words": 0, "cost_s": 30.0}

@@ -1,0 +1,20 @@
+{
+  "date": "2026-11-27",
+  "packages": {
+    "hill-roberts-2023": {
+      "source": "Harvard Dataverse doi:10.7910/DVN/TVJCTX version 1.0 (pre-correction)",
+      "n_runs": 2,
+      "found": {
+        "sentinel": 1
+      }
+    },
+    "muchlinski-2016": {
+      "source": "Harvard Dataverse doi:10.7910/DVN/KRKWK8",
+      "n_runs": 2,
+      "found": {
+        "figure_mismatch": 2,
+        "leakage": 0
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{"t": 1795828186.4338508, "action": "file report.md", "words": 321, "cost_s": 80.2}
+{"t": 1795828186.468978, "action": "file README.md", "words": 62, "cost_s": 15.5}
+{"t": 1795828186.506761, "action": "ls", "words": 9, "cost_s": 7.2}
+{"t": 1795828190.7964082, "action": "ls scripts", "words": 2, "cost_s": 5.5}
+{"t": 1795828190.833156, "action": "ls results", "words": 2, "cost_s": 5.5}
+{"t": 1795828190.868994, "action": "ls data", "words": 3, "cost_s": 5.8}
+{"t": 1795828190.906084, "action": "ls data/raw", "words": 3, "cost_s": 5.8}
+{"t": 1795828195.259552, "action": "file scripts/prepare_data.py 1 80", "words": 0, "cost_s": 110.4}
+{"t": 1795828199.767259, "action": "file scripts/fit_model.py 1 80", "words": 0, "cost_s": 146.4}
+{"t": 1795828206.581103, "action": "file results/model_ancova.json", "words": 42, "cost_s": 10.5}
+{"t": 1795828214.611302, "action": "file results/model_change.json 9 7", "words": 14, "cost_s": 3.5}
+{"t": 1795828215.78141, "action": "run -- sh -c <scratch>/audit-compare-r2/tools/none-venv/bin/python scripts/prepare_data.py --participants data/raw/participants.csv --sessions data/raw/sessions_2026-04-14_corrected.csv --out <scratch>...", "words": 42, "cost_s": 30.5}
+{"t": 1795828221.051208, "action": "file codebook.md 1 40", "words": 231, "cost_s": 57.8}
+{"t": 1795828221.086926, "action": "file data/raw/participants.csv 1 6", "words": 6, "cost_s": 1.5}
+{"t": 1795828229.959251, "action": "run -- sh -c <scratch>/audit-compare-r2/tools/none-venv/bin/python scripts/fit_model.py --data data/merged.csv --adjustment ancova --out <scratch>...", "words": 18, "cost_s": 24.5}
+{"t": 1795828230.0006652, "action": "grep read_csv figures.ipynb", "words": 4, "cost_s": 16.0}
+{"t": 1795828237.902227, "action": "grep Complete\\|COMPLETE\\|complete  data/raw/sessions_2026-04-14_corrected.csv", "words": 0, "cost_s": 15.0}

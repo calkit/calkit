@@ -1,0 +1,517 @@
+{
+  "rounds": {
+    "1": {
+      "date": "2026-11-27",
+      "n_arms": 3,
+      "n_runs": 3,
+      "min_runs_per_arm": 1,
+      "n_found_bug": 3,
+      "found": {
+        "bug": {
+          "found": 3,
+          "possible": 3
+        }
+      },
+      "seconds": {
+        "min": 67.7,
+        "max": 110.1
+      },
+      "fastest_arm": "astra",
+      "arms": {
+        "calkit": {
+          "found_bug": [
+            true
+          ],
+          "seconds": [
+            110.1
+          ],
+          "mean_seconds": 110.1,
+          "mean_tool_calls": 10,
+          "found": {
+            "bug": {
+              "found": 1,
+              "possible": 1
+            }
+          }
+        },
+        "astra": {
+          "found_bug": [
+            true
+          ],
+          "seconds": [
+            67.7
+          ],
+          "mean_seconds": 67.7,
+          "mean_tool_calls": 7,
+          "found": {
+            "bug": {
+              "found": 1,
+              "possible": 1
+            }
+          }
+        },
+        "openresearch": {
+          "found_bug": [
+            true
+          ],
+          "seconds": [
+            95.2
+          ],
+          "mean_seconds": 95.2,
+          "mean_tool_calls": 14,
+          "found": {
+            "bug": {
+              "found": 1,
+              "possible": 1
+            }
+          }
+        }
+      },
+      "conclusion": "All three agent auditors found the bug from the same giveaway (the report says missing SES was excluded next to N = 300), so this round doesn't discriminate between tools. One run per arm. No tool caught the logic error itself; all three made getting from claim to code fast, and every auditor wanted row counts in and out of each step."
+    },
+    "2": {
+      "date": "2026-11-27",
+      "n_arms": 4,
+      "n_runs": 12,
+      "min_runs_per_arm": 3,
+      "n_found_bug": 9,
+      "found": {
+        "merge": {
+          "found": 12,
+          "possible": 12
+        },
+        "reference_level": {
+          "found": 9,
+          "possible": 12
+        },
+        "stale_number": {
+          "found": 9,
+          "possible": 9
+        }
+      },
+      "seconds": {
+        "min": 55.3,
+        "max": 110.4
+      },
+      "fastest_arm": "none",
+      "arms": {
+        "none": {
+          "found_bug": [
+            null,
+            null,
+            null
+          ],
+          "seconds": [
+            64.9,
+            55.3,
+            65.1
+          ],
+          "mean_seconds": 61.766666666666666,
+          "mean_tool_calls": 6.333333333333333,
+          "found": {
+            "merge": {
+              "found": 3,
+              "possible": 3
+            },
+            "reference_level": {
+              "found": 2,
+              "possible": 3
+            },
+            "stale_number": {
+              "found": 3,
+              "possible": 3
+            }
+          }
+        },
+        "astra": {
+          "found_bug": [
+            null,
+            null,
+            null
+          ],
+          "seconds": [
+            79.1,
+            81.5,
+            97.1
+          ],
+          "mean_seconds": 85.89999999999999,
+          "mean_tool_calls": 10.333333333333334,
+          "found": {
+            "merge": {
+              "found": 3,
+              "possible": 3
+            },
+            "reference_level": {
+              "found": 3,
+              "possible": 3
+            },
+            "stale_number": {
+              "found": 3,
+              "possible": 3
+            }
+          }
+        },
+        "calkit": {
+          "found_bug": [
+            null,
+            null,
+            null
+          ],
+          "seconds": [
+            79.1,
+            67.9,
+            88.1
+          ],
+          "mean_seconds": 78.36666666666666,
+          "mean_tool_calls": 8.666666666666666,
+          "found": {
+            "merge": {
+              "found": 3,
+              "possible": 3
+            },
+            "reference_level": {
+              "found": 3,
+              "possible": 3
+            },
+            "stale_number": {
+              "found": 0,
+              "possible": 0
+            }
+          }
+        },
+        "openresearch": {
+          "found_bug": [
+            null,
+            null,
+            null
+          ],
+          "seconds": [
+            99.6,
+            110.4,
+            98.4
+          ],
+          "mean_seconds": 102.8,
+          "mean_tool_calls": 12,
+          "found": {
+            "merge": {
+              "found": 3,
+              "possible": 3
+            },
+            "reference_level": {
+              "found": 1,
+              "possible": 3
+            },
+            "stale_number": {
+              "found": 3,
+              "possible": 3
+            }
+          }
+        }
+      },
+      "conclusion": "Every auditor found the merge bug, and the stale number every time it existed. The arms differed on the reference level (Calkit 3/3, ASTRA 3/3, none 2/3, OpenResearch 1/3), which with 3 runs each is suggestive at best. No framework was fastest, and each framework added time roughly in proportion to how much tool there was to navigate. Calkit prevented the stale number by construction. Every Calkit and ASTRA auditor called their tools' green checks false comfort, since they show outputs are current, not correct."
+    },
+    "3": {
+      "date": "2026-11-27",
+      "n_arms": 4,
+      "n_runs": 8,
+      "min_runs_per_arm": 2,
+      "n_found_bug": 2,
+      "found": {
+        "merge": {
+          "found": 2,
+          "possible": 8
+        },
+        "reference_level": {
+          "found": 6,
+          "possible": 8
+        },
+        "stale_number": {
+          "found": 6,
+          "possible": 6
+        }
+      },
+      "simulated_minutes": {
+        "min": 8.8,
+        "max": 14.5
+      },
+      "fastest_arm": "none",
+      "settings": {
+        "v1": {
+          "costs": {
+            "budget_min": 20,
+            "prose_words_per_min": 240,
+            "code": "charged as prose",
+            "own_script_min": 2,
+            "run_cost_s": 20
+          },
+          "n_runs": 4,
+          "found": {
+            "merge": {
+              "found": 2,
+              "possible": 4
+            },
+            "reference_level": {
+              "found": 3,
+              "possible": 4
+            },
+            "stale_number": {
+              "found": 3,
+              "possible": 3
+            }
+          },
+          "simulated_minutes": [
+            12.4,
+            14.5,
+            13.9,
+            13.8
+          ],
+          "mean_simulated_minutes": 13.65
+        },
+        "v2": {
+          "costs": {
+            "budget_min": 15,
+            "prose_words_per_min": 240,
+            "code_lines_per_min": 25,
+            "own_script_min": 10,
+            "run_cost_s": 20
+          },
+          "n_runs": 4,
+          "found": {
+            "merge": {
+              "found": 0,
+              "possible": 4
+            },
+            "reference_level": {
+              "found": 3,
+              "possible": 4
+            },
+            "stale_number": {
+              "found": 3,
+              "possible": 3
+            }
+          },
+          "simulated_minutes": [
+            9.0,
+            9.7,
+            11.4,
+            8.8
+          ],
+          "mean_simulated_minutes": 9.725
+        }
+      },
+      "checked_by": {
+        "recomputed with own scripts": {
+          "n_runs": 2,
+          "found": {
+            "merge": {
+              "found": 2,
+              "possible": 2
+            },
+            "reference_level": {
+              "found": 2,
+              "possible": 2
+            },
+            "stale_number": {
+              "found": 1,
+              "possible": 1
+            }
+          },
+          "simulated_minutes": [
+            12.4,
+            14.5
+          ],
+          "mean_simulated_minutes": 13.45
+        },
+        "reran the authors' pipeline, which reproduces their bug": {
+          "n_runs": 1,
+          "found": {
+            "merge": {
+              "found": 0,
+              "possible": 1
+            },
+            "reference_level": {
+              "found": 1,
+              "possible": 1
+            },
+            "stale_number": {
+              "found": 1,
+              "possible": 1
+            }
+          },
+          "simulated_minutes": [
+            9.0
+          ],
+          "mean_simulated_minutes": 9.0
+        },
+        "matched saved outputs": {
+          "n_runs": 2,
+          "found": {
+            "merge": {
+              "found": 0,
+              "possible": 2
+            },
+            "reference_level": {
+              "found": 1,
+              "possible": 2
+            },
+            "stale_number": {
+              "found": 1,
+              "possible": 1
+            }
+          },
+          "simulated_minutes": [
+            9.7,
+            11.4
+          ],
+          "mean_simulated_minutes": 10.55
+        },
+        "matched saved outputs; refit for the reference level": {
+          "n_runs": 1,
+          "found": {
+            "merge": {
+              "found": 0,
+              "possible": 1
+            },
+            "reference_level": {
+              "found": 1,
+              "possible": 1
+            },
+            "stale_number": {
+              "found": 1,
+              "possible": 1
+            }
+          },
+          "simulated_minutes": [
+            13.9
+          ],
+          "mean_simulated_minutes": 13.9
+        },
+        "matched run records": {
+          "n_runs": 2,
+          "found": {
+            "merge": {
+              "found": 0,
+              "possible": 2
+            },
+            "reference_level": {
+              "found": 1,
+              "possible": 2
+            },
+            "stale_number": {
+              "found": 2,
+              "possible": 2
+            }
+          },
+          "simulated_minutes": [
+            13.8,
+            8.8
+          ],
+          "mean_simulated_minutes": 11.3
+        }
+      },
+      "arms": {
+        "none": {
+          "found_bug": [
+            null,
+            null
+          ],
+          "simulated_minutes": [
+            12.4,
+            9.0
+          ],
+          "mean_simulated_minutes": 10.7,
+          "found": {
+            "merge": {
+              "found": 1,
+              "possible": 2
+            },
+            "reference_level": {
+              "found": 2,
+              "possible": 2
+            },
+            "stale_number": {
+              "found": 2,
+              "possible": 2
+            }
+          }
+        },
+        "calkit": {
+          "found_bug": [
+            null,
+            null
+          ],
+          "simulated_minutes": [
+            14.5,
+            9.7
+          ],
+          "mean_simulated_minutes": 12.1,
+          "found": {
+            "merge": {
+              "found": 1,
+              "possible": 2
+            },
+            "reference_level": {
+              "found": 2,
+              "possible": 2
+            },
+            "stale_number": {
+              "found": 0,
+              "possible": 0
+            }
+          }
+        },
+        "astra": {
+          "found_bug": [
+            null,
+            null
+          ],
+          "simulated_minutes": [
+            13.9,
+            11.4
+          ],
+          "mean_simulated_minutes": 12.65,
+          "found": {
+            "merge": {
+              "found": 0,
+              "possible": 2
+            },
+            "reference_level": {
+              "found": 1,
+              "possible": 2
+            },
+            "stale_number": {
+              "found": 2,
+              "possible": 2
+            }
+          }
+        },
+        "openresearch": {
+          "found_bug": [
+            null,
+            null
+          ],
+          "simulated_minutes": [
+            13.8,
+            8.8
+          ],
+          "mean_simulated_minutes": 11.3,
+          "found": {
+            "merge": {
+              "found": 0,
+              "possible": 2
+            },
+            "reference_level": {
+              "found": 1,
+              "possible": 2
+            },
+            "stale_number": {
+              "found": 2,
+              "possible": 2
+            }
+          }
+        }
+      },
+      "conclusion": "With realistic reading and scripting costs (v2), no arm caught the merge that silently dropped a site: auditors checked numbers against saved outputs or reran the pipeline, which reproduces the bug, and stopped early rather than spend time profiling data. Cheap checks got done: the stale number was found whenever it existed, and the reference level was usually caught by reading code."
+    }
+  }
+}

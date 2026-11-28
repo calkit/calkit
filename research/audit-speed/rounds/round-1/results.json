@@ -1,0 +1,46 @@
+{
+  "round": 1,
+  "date": "2026-11-27",
+  "claim": "Adjusting for condition, high-SES participants scored 4.01 points higher than low-SES participants (95% CI 1.57 to 6.45; p = 0.0014).",
+  "planted_bug": {
+    "file": "clean_data.py",
+    "lines": "23-24",
+    "description": "pd.cut bins [0, 1, 2, inf] put SES code 9 ('not reported' in the codebook) into 'high', so the later dropna excludes nobody though the Methods says missing SES was excluded.",
+    "corrected": {"high_vs_low": 6.31, "ci": [3.70, 8.91], "n": 245, "treatment_effect": 3.07, "r2": 0.110}
+  },
+  "auditor": {
+    "kind": "agent",
+    "model": "claude-opus-5-5",
+    "harness": "Claude Code subagent, general-purpose, one per tool, not told a bug existed, confined to its project directory"
+  },
+  "arms": {
+    "calkit": {
+      "tool_version": "calkit 0.53.2.dev10 (commit 06c26f6a5)",
+      "found_bug": true,
+      "corrected_value": 6.31,
+      "duration_s": 110.1,
+      "tool_calls": 10,
+      "tokens": 66914,
+      "notes": "Includes rerunning the fixed pipeline in a copy to get corrected values. Fastest route: calkit show question mapped each number to its model.json key, then the stage graph led to the code. All checks passed (status, check questions, check repro), which read as validation they aren't; 'Answers verified: 0/2' was the honest signal. Found a bug: answers reported current when a stage upstream of their evidence was out of date (fixed in calkit PR 2230)."
+    },
+    "astra": {
+      "tool_version": "lightcone-cli 0.5.1, astra-tools 0.2.18",
+      "found_bug": true,
+      "corrected_value": 6.31,
+      "duration_s": 67.7,
+      "tool_calls": 7,
+      "tokens": 63003,
+      "notes": "Per-step manifests with input hashes made the chain quick to follow and check. lc status said current and astra validate passed, which check freshness and form, not correctness; the quote check only confirms the report contains a sentence the same code wrote. Only the baseline universe was defined; a second universe would have exposed the bug. Builder found that editing the cleaning code didn't mark outputs stale and that evidence verification skipped all artifact evidence."
+    },
+    "openresearch": {
+      "tool_version": "orx 0.2.30",
+      "found_bug": true,
+      "corrected_value": 6.31,
+      "duration_s": 95.2,
+      "tool_calls": 14,
+      "tokens": 67010,
+      "notes": "Run tied to a commit, byte-identical snapshot, and full log; the run directory kept intermediate data that exposed the bug. No record links a reported number to the code that made it, so the chain was reconstructed from run.sh; logs show a 500-character preview. Read-only commands started a background server that wrote to the audited store. On its first build run, orx copied the user's Hugging Face token into a stored launch.json, contradicting its own source comment."
+    }
+  },
+  "conclusion": "All three agent auditors found the bug from the same giveaway (the report says missing SES was excluded next to N = 300), so this round doesn't discriminate between tools. One run per arm. No tool caught the logic error itself; all three made getting from claim to code fast, and every auditor wanted row counts in and out of each step."
+}

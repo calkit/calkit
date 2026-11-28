@@ -1,0 +1,14 @@
+{"t": 1795827865.0680509, "action": "run -- <scratch>/audit-compare/tools/openresearch/bin/orx project view", "words": 26, "cost_s": 26.5}
+{"t": 1795827868.260753, "action": "file ../orx-data/files/cognitive-training/cognitive-training/report.md 1 80", "words": 321, "cost_s": 80.2}
+{"t": 1795827872.37535, "action": "run -- <scratch>/audit-compare/tools/openresearch/bin/orx exp status 6bf18710-9bad-4832-b2f6-15d992af4c66", "words": 136, "cost_s": 54.0}
+{"t": 1795827877.577017, "action": "run -- <scratch>/audit-compare/tools/openresearch/bin/orx exp status 8aef98ff-7b04-478b-bee3-3f4617e957cb", "words": 137, "cost_s": 54.2}
+{"t": 1795827882.1986098, "action": "run -- git diff --stat orx/baseline orx/change-score", "words": 19, "cost_s": 24.8}
+{"t": 1795827885.578878, "action": "run -- git diff orx/baseline orx/change-score -- analysis.json codebook.md", "words": 106, "cost_s": 46.5}
+{"t": 1795827888.871615, "action": "run -- git ls-tree -r --name-only orx/change-score", "words": 11, "cost_s": 22.8}
+{"t": 1795827895.157527, "action": "run -- git show orx/change-score:scripts/prepare_data.py", "words": 149, "cost_s": 57.2}
+{"t": 1795827898.779459, "action": "run -- git show orx/change-score:scripts/fit_model.py", "words": 186, "cost_s": 66.5}
+{"t": 1795827914.3714838, "action": "run --wrote -- python3 -I <scratch>/or1chk.Z06a/chk.py", "words": 60, "cost_s": 135.0}
+{"t": 1795827918.411677, "action": "run -- <scratch>/audit-compare/tools/openresearch/bin/orx exp status 28cf5b79-cd0a-4a21-8628-eada7ed47a59", "words": 129, "cost_s": 52.2}
+{"t": 1795827922.986152, "action": "view ../orx-data/files/cognitive-training/cognitive-training/score_by_week.png", "words": 0, "cost_s": 30.0}
+{"t": 1795827929.2850308, "action": "run -- git show orx/corrected-sessions-export:run.sh", "words": 131, "cost_s": 52.8}
+{"t": 1795827937.506046, "action": "run --wrote -- python3 -I <scratch>/or1chk.Z06a/desc.py", "words": 14, "cost_s": 123.5}

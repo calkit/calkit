@@ -1,0 +1,89 @@
+{
+  "rules": {
+    "negative": "negatives in an otherwise non-negative column, under 5% of its values",
+    "far": "values over 10 1st-99th percentile spans past either end, under 2% of its values"
+  },
+  "n_files": 5,
+  "n_files_flagged": 1,
+  "n_columns_flagged": 3,
+  "n_flags": 5,
+  "files": {
+    "data/China2021Data.csv": {
+      "n_rows": 1058,
+      "n_numeric_columns": 11,
+      "n_flags": 0,
+      "flags": {}
+    },
+    "data/LucidPlotText.csv": {
+      "n_rows": 58,
+      "n_numeric_columns": 0,
+      "n_flags": 0,
+      "flags": {}
+    },
+    "data/LucidWideFile.csv": {
+      "n_rows": 2055,
+      "n_numeric_columns": 26,
+      "n_flags": 5,
+      "flags": {
+        "lucid_hhi": [
+          {
+            "rule": "negative",
+            "n": 83,
+            "n_values": 2055,
+            "examples": [
+              -3105
+            ]
+          }
+        ],
+        "lucid_education": [
+          {
+            "rule": "negative",
+            "n": 14,
+            "n_values": 2055,
+            "examples": [
+              -3105
+            ]
+          },
+          {
+            "rule": "far",
+            "n": 14,
+            "n_values": 2055,
+            "examples": [
+              -3105
+            ]
+          }
+        ],
+        "education": [
+          {
+            "rule": "negative",
+            "n": 14,
+            "n_values": 2055,
+            "examples": [
+              -3105
+            ]
+          },
+          {
+            "rule": "far",
+            "n": 14,
+            "n_values": 2055,
+            "examples": [
+              -3105
+            ]
+          }
+        ]
+      }
+    },
+    "data/Pre2020Surveys_Pooled.csv": {
+      "n_rows": 66030,
+      "n_numeric_columns": 9,
+      "n_flags": 0,
+      "flags": {}
+    },
+    "data/anes_timeseries_2020_stata_20220210_hill_roberts_subset.csv": {
+      "n_rows": 8280,
+      "n_numeric_columns": 1,
+      "n_flags": 0,
+      "flags": {}
+    }
+  }
+}

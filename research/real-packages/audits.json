@@ -1,0 +1,39 @@
+{
+  "date": "2026-11-27",
+  "task": "Agent auditors, unlimited reading, no web access, audit published replication packages as originally deposited, with known problems documented in public reproduction reports.",
+  "packages": {
+    "hill-roberts-2023": {
+      "source": "Harvard Dataverse doi:10.7910/DVN/TVJCTX version 1.0 (pre-correction)",
+      "known_problem": "14 of 2,055 respondents' education coded -3105 (platform's 'none of the above') and used as a continuous covariate; dropping them reverses the education-acquiescence association (corrigendum doi:10.1017/pan.2024.27).",
+      "runs": [
+        {
+          "found_sentinel": true,
+          "other": "likely misclassified party alignment of 3 items; fixing strengthens the partisan finding"
+        },
+        {
+          "found_sentinel": false,
+          "other": "same party-alignment issue; never tabulated raw education values"
+        }
+      ]
+    },
+    "muchlinski-2016": {
+      "source": "Harvard Dataverse doi:10.7910/DVN/KRKWK8",
+      "known_problems": [
+        "ROC figure AUC differs from text (Wang 2019)",
+        "imputation fit on train and test together leaks information; with train-only imputation RF is no better than logit (Kapoor & Narayanan 2023)"
+      ],
+      "runs": [
+        {
+          "found_figure_mismatch": true,
+          "found_leakage": false,
+          "other": "out-of-sample Africa test scores random training rows; flagged that the imputation step isn't in the package"
+        },
+        {
+          "found_figure_mismatch": true,
+          "found_leakage": false,
+          "other": "same out-of-sample finding; flagged the missing raw data and imputation code"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,5 @@
+id: change_score
+description: "Sensitivity analysis: change from baseline as the outcome"
+
+decisions:
+  adjustment: change

@@ -1,0 +1,19 @@
+{"t": 1795827864.1853921, "action": "run -- astra info", "words": 511, "cost_s": 147.8}
+{"t": 1795827864.221299, "action": "ls", "words": 16, "cost_s": 9.0}
+{"t": 1795827867.9619992, "action": "file index.md 1 80", "words": 181, "cost_s": 45.2}
+{"t": 1795827871.93276, "action": "grep -n ^findings: astra.yaml", "words": 1, "cost_s": 15.2}
+{"t": 1795827875.461473, "action": "file astra.yaml 81 90", "words": 344, "cost_s": 86.0}
+{"t": 1795827880.0638232, "action": "ls results", "words": 3, "cost_s": 5.8}
+{"t": 1795827883.610511, "action": "ls results/baseline", "words": 6, "cost_s": 6.5}
+{"t": 1795827887.299072, "action": "file results/baseline/model_results.json 1 70", "words": 42, "cost_s": 10.5}
+{"t": 1795827891.346709, "action": "grep -n treatment\\|n_analyzed results/change_score/model_results.json", "words": 15, "cost_s": 18.8}
+{"t": 1795827895.8383, "action": "file src/prepare_data.py 1 70", "words": 149, "cost_s": 37.2}
+{"t": 1795827901.044205, "action": "file codebook.md 1 60", "words": 231, "cost_s": 57.8}
+{"t": 1795827905.0438778, "action": "ls data", "words": 3, "cost_s": 5.8}
+{"t": 1795827905.0775838, "action": "file astra.yaml 1 30", "words": 142, "cost_s": 35.5}
+{"t": 1795827908.829498, "action": "file data/README.md 1 40", "words": 39, "cost_s": 9.8}
+{"t": 1795827908.883451, "action": "run -- git log --oneline -8", "words": 47, "cost_s": 31.8}
+{"t": 1795827913.931083, "action": "run -- git show --stat --format=%s cc0373a 677024f", "words": 41, "cost_s": 30.2}
+{"t": 1795827917.972343, "action": "run -- git show -U0 --format= cc0373a -- astra.yaml", "words": 341, "cost_s": 105.2}
+{"t": 1795827922.81649, "action": "file src/fit_model.py 1 70", "words": 186, "cost_s": 46.5}
+{"t": 1795827936.2218812, "action": "run --wrote -- .venv/bin/python -I <scratch>/myaudit.Glhd/refit.py results/baseline/analysis_data.csv", "words": 45, "cost_s": 131.2}

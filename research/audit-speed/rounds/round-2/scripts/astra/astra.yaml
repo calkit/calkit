@@ -1,0 +1,79 @@
+# ASTRA Analysis Specification
+
+version: "0.0.14"
+name: "Computerized cognitive training and cognitive scores in older adults"
+description: >-
+  Does a 12-week computerized cognitive training program raise cognitive
+  scores in older adults, relative to a waitlist control, and how do scores
+  differ by education and age? Participants from four community centers are
+  merged with their assessment sessions, and week-12 scores are modeled with
+  OLS. The codebook for both input files is codebook.md.
+
+inputs:
+  - id: participants
+    type: data
+    source: data/participants.csv
+    description: >-
+      Enrollment database export, one row per enrolled participant: site,
+      arm, age, sex, and education, coded as in codebook.md.
+  - id: sessions
+    type: data
+    source: data/sessions.csv
+    description: >-
+      Assessment sessions exported from the sites' tablet apps, one row per
+      session at weeks 0, 4, 8, and 12, with status and composite score.
+
+outputs:
+  - id: analysis_data
+    type: data
+    format: csv
+    description: >-
+      One row per analyzed participant: eligible ages (60–85), scores from
+      complete sessions by week, and participants with a scored baseline
+      and week-12 assessment only.
+    inputs: [participants, sessions]
+    recipe:
+      command: >-
+        python src/prepare_data.py --participants {inputs.participants}
+        --sessions {inputs.sessions} --out {output}
+
+  - id: model_results
+    type: metric
+    format: json
+    description: >-
+      OLS fit of week-12 outcome on arm, age per 10 years, and education
+      (secondary as reference), with baseline score as a covariate or
+      subtracted from the outcome per the adjustment decision: sample size,
+      descriptive means, estimates, 95% confidence intervals, p-values, R².
+    inputs: [analysis_data]
+    decisions: [adjustment]
+    recipe:
+      command: >-
+        python src/fit_model.py --data {inputs.analysis_data}
+        --adjustment {decisions.adjustment} --out {output}
+
+  - id: score_by_week
+    type: figure
+    format: png
+    description: Mean cognitive score by assessment week and arm, with 95% CIs.
+    inputs: [analysis_data]
+    recipe:
+      command: python src/make_figure.py --data {inputs.analysis_data} --out {output}
+
+decisions:
+  adjustment:
+    label: "Baseline adjustment"
+    rationale: >-
+      Baseline scores can be used as a covariate (ANCOVA) or subtracted from
+      the week-12 score (change score). ANCOVA is usually more precise in a
+      randomized trial and is the primary analysis; the change score makes
+      fewer modeling assumptions about how baseline relates to follow-up.
+      The two can differ when baseline is imbalanced or measured with error,
+      so the change score is kept as a sensitivity analysis.
+    tags: [stats]
+    default: ancova
+    options:
+      ancova:
+        label: "ANCOVA: week-12 score with baseline score as a covariate"
+      change:
+        label: "Change score: week-12 minus baseline score as the outcome"

@@ -1,0 +1,22 @@
+{
+  "doi": "10.7910/DVN/TVJCTX",
+  "version": "1.0",
+  "release_time": "2022-10-12T02:47:50Z",
+  "license": {
+    "name": "CC0 1.0",
+    "uri": "http://creativecommons.org/publicdomain/zero/1.0",
+    "iconUri": "https://licensebuttons.net/p/zero/1.0/88x31.png",
+    "rightsIdentifier": "CC0-1.0",
+    "rightsIdentifierScheme": "SPDX",
+    "schemeUri": "https://spdx.org/licenses/",
+    "languageCode": "en"
+  },
+  "terms_of_use": null,
+  "file_id": 6558488,
+  "filename": "HillRobertsRepArchive.zip",
+  "size_bytes": 946455,
+  "checksum": {
+    "type": "MD5",
+    "value": "ce64c99b006de8afe428e3a4a66081a5"
+  }
+}

@@ -1,0 +1,21 @@
+{"t": 1795827861.354978, "action": "file report.md 1 60", "words": 321, "cost_s": 80.2}
+{"t": 1795827861.392596, "action": "ls", "words": 9, "cost_s": 7.2}
+{"t": 1795827864.8351848, "action": "file README.md", "words": 62, "cost_s": 15.5}
+{"t": 1795827864.8691862, "action": "ls scripts", "words": 2, "cost_s": 5.5}
+{"t": 1795827864.902637, "action": "ls results", "words": 2, "cost_s": 5.5}
+{"t": 1795827864.937589, "action": "ls data", "words": 3, "cost_s": 5.8}
+{"t": 1795827868.5256681, "action": "ls data/raw", "words": 3, "cost_s": 5.8}
+{"t": 1795827868.5596821, "action": "file scripts/prepare_data.py 1 80", "words": 149, "cost_s": 37.2}
+{"t": 1795827872.499451, "action": "file scripts/fit_model.py 1 80", "words": 186, "cost_s": 46.5}
+{"t": 1795827877.968701, "action": "file results/model_ancova.json 1 30", "words": 42, "cost_s": 10.5}
+{"t": 1795827886.417265, "action": "run -- sh -c <scratch>/audit-compare-r2/tools/none-venv/bin/python scripts/prepare_data.py --participants data/raw/participants.csv --sessions data/raw/sessions_2026-04-14_corrected.csv --out <scratch>...", "words": 49, "cost_s": 32.2}
+{"t": 1795827891.034869, "action": "file codebook.md 1 60", "words": 231, "cost_s": 57.8}
+{"t": 1795827891.071828, "action": "file results/model_change.json 1 22", "words": 42, "cost_s": 10.5}
+{"t": 1795827902.797353, "action": "run --wrote -- <scratch>/audit-compare-r2/tools/none-venv/bin/python <scratch>/audit4aca/check.py .", "words": 137, "cost_s": 154.2}
+{"t": 1795827907.741715, "action": "grep -i d-0[01] data/raw/participants.csv", "words": 19, "cost_s": 19.8}
+{"t": 1795827907.781585, "action": "grep -i ^ *d.\\?0[01] data/raw/sessions_2026-04-14_corrected.csv", "words": 0, "cost_s": 15.0}
+{"t": 1795827911.60439, "action": "grep -i d data/raw/sessions_2026-04-14_corrected.csv", "words": 143, "cost_s": 50.8}
+{"t": 1795827911.645397, "action": "file data/raw/sessions_2026-04-14_corrected.csv 1 4", "words": 4, "cost_s": 1.0}
+{"t": 1795827923.684788, "action": "run --wrote -- <scratch>/audit-compare-r2/tools/none-venv/bin/python <scratch>/audit4aca/fix.py .", "words": 57, "cost_s": 134.2}
+{"t": 1795827928.0307672, "action": "grep csv\\|savefig figures.ipynb", "words": 9, "cost_s": 17.2}
+{"t": 1795827932.88896, "action": "view figures/score_by_week.png", "words": 0, "cost_s": 30.0}

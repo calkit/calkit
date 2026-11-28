@@ -1,0 +1,4 @@
+69036	Image duplication: beta-actin western blots reused across figures; no data/analysis-artifact mechanism (excluded).
+69095	Correction for image duplication/wrong images during figure assembly (mouse images and migration panels); excluded as image duplication.
+69094	Retraction for duplicated data panels overlapping an earlier paper plus figure-assembly errors; excluded as image duplication.
+69136	Retraction for overlapping migration/invasion image panels; excluded as image duplication.

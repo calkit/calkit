@@ -1,0 +1,617 @@
+{
+  "weights": {
+    "changed": 3,
+    "weakened": 1,
+    "unclear": 0.5,
+    "none": 0
+  },
+  "profile_types": [
+    "sentinel_or_missing_code",
+    "merge_or_join",
+    "duplicate_rows"
+  ],
+  "profile_types_with_units": [
+    "sentinel_or_missing_code",
+    "merge_or_join",
+    "duplicate_rows",
+    "unit_or_conversion"
+  ],
+  "person_found": [
+    "author_self_check",
+    "reader_report",
+    "domain_knowledge"
+  ],
+  "modeling_types": [
+    "calculation_error",
+    "numerical_method",
+    "leakage",
+    "interpretation_error",
+    "wrong_variable",
+    "inference"
+  ],
+  "n_rows": 316,
+  "n_low_or_medium_confidence": 198,
+  "samples": {
+    "general": {
+      "title": "Human era, general research",
+      "n_rows": 175,
+      "n_errors": 145,
+      "n_none_found": 30,
+      "n_low_or_medium_confidence": 110,
+      "selections": {
+        "i4r_block_111_180": 86,
+        "kapoor_narayanan_first_per_field": 24,
+        "rw_random_seed20261127": 65
+      },
+      "impact": {
+        "changed": 51,
+        "weakened": 9,
+        "unclear": 40,
+        "none": 45
+      },
+      "weighted": 182.0,
+      "unspecified_weighted": 50.5,
+      "by_type": {
+        "unspecified": {
+          "changed": 14,
+          "weakened": 0,
+          "unclear": 17,
+          "none": 4,
+          "weighted": 50.5
+        },
+        "leakage": {
+          "changed": 8,
+          "weakened": 3,
+          "unclear": 9,
+          "none": 0,
+          "weighted": 31.5
+        },
+        "calculation_error": {
+          "changed": 7,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 0,
+          "weighted": 21.5
+        },
+        "interpretation_error": {
+          "changed": 5,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 0,
+          "weighted": 15.0
+        },
+        "design_or_measurement": {
+          "changed": 4,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 0,
+          "weighted": 12.0
+        },
+        "wrong_variable": {
+          "changed": 3,
+          "weakened": 1,
+          "unclear": 1,
+          "none": 0,
+          "weighted": 10.5
+        },
+        "unit_or_conversion": {
+          "changed": 3,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 0,
+          "weighted": 9.0
+        },
+        "transcription": {
+          "changed": 2,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 6,
+          "weighted": 6.0
+        },
+        "inference": {
+          "changed": 1,
+          "weakened": 1,
+          "unclear": 1,
+          "none": 0,
+          "weighted": 4.5
+        },
+        "sample_filter": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 1,
+          "weighted": 3.5
+        },
+        "recode_error": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 3,
+          "weighted": 3.5
+        },
+        "upstream_data_error": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 0,
+          "weighted": 3.5
+        },
+        "spec_mismatch": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 7,
+          "weighted": 3.0
+        },
+        "other": {
+          "changed": 0,
+          "weakened": 2,
+          "unclear": 2,
+          "none": 5,
+          "weighted": 3.0
+        },
+        "sentinel_or_missing_code": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 3,
+          "none": 2,
+          "weighted": 1.5
+        },
+        "environment": {
+          "changed": 0,
+          "weakened": 1,
+          "unclear": 0,
+          "none": 5,
+          "weighted": 1.0
+        },
+        "missing_step": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 2,
+          "none": 12,
+          "weighted": 1.0
+        },
+        "merge_or_join": {
+          "changed": 0,
+          "weakened": 1,
+          "unclear": 0,
+          "none": 0,
+          "weighted": 1.0
+        },
+        "duplicate_rows": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 0,
+          "weighted": 0.5
+        }
+      },
+      "changed": {
+        "n": 51,
+        "n_specified": 37,
+        "top_type": "unspecified",
+        "top_type_n": 14,
+        "n_modeling": 24,
+        "n_found_by_person": 40,
+        "by_type": {
+          "unspecified": 14,
+          "leakage": 8,
+          "calculation_error": 7,
+          "interpretation_error": 5,
+          "design_or_measurement": 4,
+          "wrong_variable": 3,
+          "unit_or_conversion": 3,
+          "transcription": 2,
+          "upstream_data_error": 1,
+          "spec_mismatch": 1,
+          "recode_error": 1,
+          "inference": 1,
+          "sample_filter": 1
+        },
+        "by_stage": {
+          "modeling": 13,
+          "data collection": 11,
+          "transformation": 10,
+          "unknown": 7,
+          "cleaning": 3,
+          "import": 3,
+          "figure": 2,
+          "merge": 1,
+          "inference": 1
+        },
+        "by_how_found": {
+          "author_self_check": 28,
+          "reader_report": 9,
+          "domain_knowledge": 7,
+          "reanalysis_alt_spec": 6,
+          "reran_code": 5,
+          "unknown": 4,
+          "new_data": 3,
+          "rederived_from_raw": 1,
+          "read_code": 1,
+          "profiled_data": 1
+        }
+      },
+      "n_writing_stage": 0,
+      "n_overclaim_or_fabricated": 0,
+      "profile_catchable": {
+        "core": {
+          "weighted": 3.0,
+          "share": 0.016483516483516484,
+          "share_of_specified": 0.022813688212927757,
+          "n_changed": 0
+        },
+        "with_units": {
+          "weighted": 12.0,
+          "share": 0.06593406593406594,
+          "share_of_specified": 0.09125475285171103,
+          "n_changed": 3
+        }
+      },
+      "stale": {
+        "n": 0,
+        "n_changed": 0,
+        "ids": []
+      }
+    },
+    "physics_engineering": {
+      "title": "Human era, computational physics and engineering",
+      "n_rows": 71,
+      "n_errors": 71,
+      "n_none_found": 0,
+      "n_low_or_medium_confidence": 40,
+      "selections": {
+        "cpe_errata_census_seed20261127_first40": 40,
+        "cpe_errata_census_seed20261127_overflow": 31
+      },
+      "impact": {
+        "changed": 9,
+        "weakened": 0,
+        "unclear": 24,
+        "none": 38
+      },
+      "weighted": 39.0,
+      "unspecified_weighted": 4.5,
+      "by_type": {
+        "calculation_error": {
+          "changed": 5,
+          "weakened": 0,
+          "unclear": 4,
+          "none": 16,
+          "weighted": 17.0
+        },
+        "numerical_method": {
+          "changed": 2,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 1,
+          "weighted": 6.5
+        },
+        "unspecified": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 9,
+          "none": 6,
+          "weighted": 4.5
+        },
+        "spec_mismatch": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 2,
+          "none": 4,
+          "weighted": 4.0
+        },
+        "unit_or_conversion": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 2,
+          "none": 6,
+          "weighted": 4.0
+        },
+        "other": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 3,
+          "none": 1,
+          "weighted": 1.5
+        },
+        "wrong_variable": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 1,
+          "weighted": 0.5
+        },
+        "transcription": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 1,
+          "weighted": 0.5
+        },
+        "design_or_measurement": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 0,
+          "weighted": 0.5
+        },
+        "sample_filter": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 1,
+          "weighted": 0.0
+        },
+        "stale_result": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 1,
+          "weighted": 0.0
+        }
+      },
+      "changed": {
+        "n": 9,
+        "n_specified": 9,
+        "top_type": "calculation_error",
+        "top_type_n": 5,
+        "n_modeling": 7,
+        "n_found_by_person": 5,
+        "by_type": {
+          "calculation_error": 5,
+          "numerical_method": 2,
+          "unit_or_conversion": 1,
+          "spec_mismatch": 1
+        },
+        "by_stage": {
+          "modeling": 9
+        },
+        "by_how_found": {
+          "unknown": 4,
+          "author_self_check": 3,
+          "reader_report": 2
+        }
+      },
+      "n_writing_stage": 0,
+      "n_overclaim_or_fabricated": 0,
+      "profile_catchable": {
+        "core": {
+          "weighted": 0,
+          "share": 0.0,
+          "share_of_specified": 0.0,
+          "n_changed": 0
+        },
+        "with_units": {
+          "weighted": 4.0,
+          "share": 0.10256410256410256,
+          "share_of_specified": 0.11594202898550725,
+          "n_changed": 1
+        }
+      },
+      "stale": {
+        "n": 1,
+        "n_changed": 0,
+        "ids": [
+          "CPE-47"
+        ]
+      }
+    },
+    "agent": {
+      "title": "Agent era",
+      "n_rows": 70,
+      "n_errors": 68,
+      "n_none_found": 2,
+      "n_low_or_medium_confidence": 48,
+      "selections": {
+        "agent_sakana_v1_self_disclosed_all_specific": 8,
+        "agent_sakana_v2_self_review_all_specific": 4,
+        "agent_sakana_critique_beel2025_all_specific": 5,
+        "agent_luo2025_hidden_pitfalls_all_modes": 4,
+        "agent_agents4science_code_audits_all_flagged": 15,
+        "agent_agents4science_organizers_report_all_specific": 5,
+        "agent_kosmos_paper_in_order": 7,
+        "agent_google_coe_audit_in_order": 8,
+        "agent_auditability_papers_in_order": 2,
+        "agent_survey_in_order": 2,
+        "agent_incidents_search": 10
+      },
+      "impact": {
+        "changed": 23,
+        "weakened": 8,
+        "unclear": 28,
+        "none": 9
+      },
+      "weighted": 91.0,
+      "unspecified_weighted": 5.0,
+      "by_type": {
+        "spec_mismatch": {
+          "changed": 8,
+          "weakened": 1,
+          "unclear": 1,
+          "none": 1,
+          "weighted": 25.5
+        },
+        "overclaim": {
+          "changed": 2,
+          "weakened": 1,
+          "unclear": 6,
+          "none": 0,
+          "weighted": 10.0
+        },
+        "fabricated_result": {
+          "changed": 2,
+          "weakened": 1,
+          "unclear": 3,
+          "none": 1,
+          "weighted": 8.5
+        },
+        "leakage": {
+          "changed": 2,
+          "weakened": 1,
+          "unclear": 1,
+          "none": 0,
+          "weighted": 7.5
+        },
+        "reward_hacking": {
+          "changed": 2,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 1,
+          "weighted": 6.0
+        },
+        "unspecified": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 4,
+          "none": 0,
+          "weighted": 5.0
+        },
+        "other": {
+          "changed": 1,
+          "weakened": 1,
+          "unclear": 2,
+          "none": 0,
+          "weighted": 5.0
+        },
+        "unrecorded_decision": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 2,
+          "none": 0,
+          "weighted": 4.0
+        },
+        "wrong_variable": {
+          "changed": 1,
+          "weakened": 1,
+          "unclear": 0,
+          "none": 1,
+          "weighted": 4.0
+        },
+        "stale_result": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 0,
+          "weighted": 3.0
+        },
+        "merge_or_join": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 0,
+          "weighted": 3.0
+        },
+        "recode_error": {
+          "changed": 1,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 0,
+          "weighted": 3.0
+        },
+        "missing_step": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 5,
+          "none": 0,
+          "weighted": 2.5
+        },
+        "forking_paths_at_scale": {
+          "changed": 0,
+          "weakened": 1,
+          "unclear": 2,
+          "none": 0,
+          "weighted": 2.0
+        },
+        "inference": {
+          "changed": 0,
+          "weakened": 1,
+          "unclear": 0,
+          "none": 0,
+          "weighted": 1.0
+        },
+        "fabricated_citation": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 3,
+          "weighted": 0.5
+        },
+        "scope_drift": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 1,
+          "none": 0,
+          "weighted": 0.5
+        },
+        "unrequested_change": {
+          "changed": 0,
+          "weakened": 0,
+          "unclear": 0,
+          "none": 2,
+          "weighted": 0.0
+        }
+      },
+      "changed": {
+        "n": 23,
+        "n_specified": 22,
+        "top_type": "spec_mismatch",
+        "top_type_n": 8,
+        "n_modeling": 3,
+        "n_found_by_person": 8,
+        "by_type": {
+          "spec_mismatch": 8,
+          "leakage": 2,
+          "overclaim": 2,
+          "fabricated_result": 2,
+          "reward_hacking": 2,
+          "stale_result": 1,
+          "unrecorded_decision": 1,
+          "unspecified": 1,
+          "merge_or_join": 1,
+          "recode_error": 1,
+          "wrong_variable": 1,
+          "other": 1
+        },
+        "by_stage": {
+          "modeling": 12,
+          "writing": 5,
+          "inference": 3,
+          "import": 1,
+          "merge": 1,
+          "data collection": 1
+        },
+        "by_how_found": {
+          "read_code": 15,
+          "domain_knowledge": 8,
+          "compared_text_to_output": 5,
+          "reran_code": 5,
+          "rederived_from_raw": 2
+        }
+      },
+      "n_writing_stage": 10,
+      "n_overclaim_or_fabricated": 16,
+      "profile_catchable": {
+        "core": {
+          "weighted": 3.0,
+          "share": 0.03296703296703297,
+          "share_of_specified": 0.03488372093023256,
+          "n_changed": 1
+        },
+        "with_units": {
+          "weighted": 3.0,
+          "share": 0.03296703296703297,
+          "share_of_specified": 0.03488372093023256,
+          "n_changed": 1
+        }
+      },
+      "stale": {
+        "n": 1,
+        "n_changed": 1,
+        "ids": [
+          "AG-S-14"
+        ]
+      }
+    }
+  }
+}

@@ -2669,6 +2669,7 @@ def check_all_in_pipeline(
     from contextlib import contextmanager
     from typing import IO
 
+    import calkit.environments.inline
     import calkit.progress
     from calkit.cli.check import check_environment
 
@@ -2759,6 +2760,28 @@ def check_all_in_pipeline(
                     res[env_name]["output"] = "\n".join(
                         lines[-FAILED_CHECK_OUTPUT_LINES:]
                     )
+    # Scripts that declare their own environments, keyed by path
+    for stage in stages.values():
+        script_path = calkit.environments.inline.get_stage_script_path(stage)
+        if script_path is None or script_path in res:
+            continue
+        if not os.path.isfile(script_path):
+            continue
+        current = calkit.environments.inline.lock_is_current(script_path)
+        if current and not force:
+            res[script_path] = {"success": True, "cached": True}
+            continue
+        if progress is not None:
+            progress(f"Locking environment of {script_path}")
+        try:
+            calkit.environments.inline.lock(script_path, force=True)
+            res[script_path] = {"success": True}
+        except (ValueError, RuntimeError) as e:
+            res[script_path] = {
+                "success": False,
+                "error": str(e),
+                "output": str(e),
+            }
     return res
 
 

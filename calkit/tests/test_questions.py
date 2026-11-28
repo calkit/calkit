@@ -10,7 +10,10 @@ import pytest
 
 import calkit
 from calkit.models.core import ProjectInfo, Question
-from calkit.pipeline import frozen_tainted_stage_names
+from calkit.pipeline import (
+    frozen_tainted_stage_names,
+    get_downstream_stage_names,
+)
 from calkit.questions import (
     QuestionsStatus,
     check_question,
@@ -820,6 +823,108 @@ def test_check_questions_frozen_subproject(tmp_dir):
     )
     assert isinstance(rendered, dict)
     assert rendered["answer"] == "2."
+
+
+def test_check_questions_upstream_of_evidence(tmp_dir):
+    subprocess.check_call(["calkit", "init"])
+    for path in ["n.txt", "adj.txt"]:
+        with open(path, "w") as f:
+            f.write("2\n")
+    ck_info = calkit.load_calkit_info()
+    ck_info["pipeline"] = {
+        "stages": {
+            "clean": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "cp n.txt clean.txt",
+                "inputs": ["n.txt"],
+                "outputs": [{"path": "clean.txt", "storage": "git"}],
+            },
+            "fit": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": 'echo "{\\"v\\": $(cat clean.txt)}" > result.json',
+                "inputs": ["clean.txt"],
+                "outputs": [{"path": "result.json", "storage": "git"}],
+            },
+            "unrelated": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "echo 1 > other.txt",
+                "outputs": [{"path": "other.txt", "storage": "git"}],
+            },
+            # An iterated stage's outputs are templated on the iteration
+            "fit-each": {
+                "kind": "shell-command",
+                "environment": "_system",
+                "command": "cp clean.txt model-{adj}.txt",
+                "inputs": ["clean.txt", "adj.txt"],
+                "outputs": [{"path": "model-{adj}.txt", "storage": "git"}],
+                "iterate_over": [
+                    {"arg_name": "adj", "values": ["ancova", "change"]}
+                ],
+            },
+        }
+    }
+    ck_info["questions"] = [
+        {
+            "question": "How big?",
+            "answer": "{v}.",
+            "evidence": [
+                {
+                    "kind": "value",
+                    "path": "result.json",
+                    "key": "v",
+                    "name": "v",
+                }
+            ],
+        },
+        {
+            "question": "How big, adjusted?",
+            "answer": "Big.",
+            "evidence": [{"path": "model-change.txt"}],
+        },
+    ]
+    _write_yaml(ck_info)
+    subprocess.check_call(["calkit", "run"])
+    status = check_questions(wdir=".")
+    assert [q.status for q in status.questions] == ["ok", "ok"]
+    # Evidence from an iterated stage is traced to that stage
+    assert status.questions[1].evidence[0].stage == "fit-each"
+    assert [q.stages for q in status.questions] == [
+        ["clean", "fit"],
+        ["clean", "fit-each"],
+    ]
+    # An out-of-date iterated stage makes only its evidence stale
+    for content, expected, message in [
+        ("3\n", "stale", "stage 'fit-each' is out of date"),
+        ("2\n", "ok", None),
+    ]:
+        with open("adj.txt", "w") as f:
+            f.write(content)
+        status = check_questions(wdir=".")
+        assert [q.status for q in status.questions] == ["ok", expected]
+        evidence_message = status.questions[1].evidence[0].message
+        assert (message is None) == (evidence_message is None)
+        assert message is None or message in (evidence_message or "")
+    # Only the stage whose input changed is out of date to DVC, but the
+    # evidence is built from its output, so running the pipeline rebuilds it
+    with open("n.txt", "w") as f:
+        f.write("3\n")
+    assert get_downstream_stage_names({"clean"}) == {
+        "clean",
+        "fit",
+        "fit-each",
+    }
+    status = check_questions(wdir=".")
+    assert [q.status for q in status.questions] == ["stale", "stale"]
+    assert "stage 'fit' is out of date" in (
+        status.questions[0].evidence[0].message or ""
+    )
+    assert not status.ok
+    # Nothing downstream, or no pipeline record, leaves the names as given
+    assert get_downstream_stage_names({"unrelated"}) == {"unrelated"}
+    assert get_downstream_stage_names({"clean"}, wdir="nowhere") == {"clean"}
 
 
 def test_sign_offs_and_stages(tmp_dir):

@@ -4046,7 +4046,7 @@ Options:
 
 Check that the project's environments are up to date.
 
-Subprojects' environments are checked too, as 'calkit run' does.
+Subprojects' environments are checked too, as 'calkit run' does, and so are those that stages' scripts declare.
 
 Usage:
 

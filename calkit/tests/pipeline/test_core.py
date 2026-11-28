@@ -139,7 +139,8 @@ def test_to_dvc():
     )
     assert env_lock in stage["deps"]
     # TODO: Test other stage types
-    # Test when user forgets to add an environment
+    # With no environment, the script's own is used, which it's checked to
+    # declare once it's there
     ck_info = {
         "environments": envs,
         "pipeline": {
@@ -154,8 +155,11 @@ def test_to_dvc():
             }
         },
     }
-    with pytest.raises(ValueError):
-        calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    stage = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)["get-data"]
+    assert stage["cmd"] == (
+        "uv run --locked --script something/my-cool-script.py"
+    )
+    assert "something/my-cool-script.py.lock" in stage["deps"]
     # Test that we can define inputs from stage outputs
     ck_info = {
         "environments": envs,
@@ -4418,7 +4422,28 @@ def test_get_stage_for_output_reads_map_paths_destinations():
         "environment": "py",
         "outputs": ["."],
     }
+    # An iterated stage produces what its output templates match, after a
+    # stage declaring the path itself
+    stages["fit"] = {
+        "kind": "python-script",
+        "script_path": "fit.py",
+        "environment": "py",
+        "wdir": "results",
+        "outputs": [{"path": "trace/model-{adj}.json"}, "fit-${case}.csv"],
+        "iterate_over": [{"arg_name": "adj", "values": ["a", "b"]}],
+    }
+    stages["fit-b"] = {
+        "kind": "python-script",
+        "script_path": "fit.py",
+        "environment": "py",
+        "outputs": ["results/trace/model-b.json"],
+    }
     for path, stage in [
+        ("results/trace/model-a.json", "fit"),
+        ("results/trace/model-b.json", "fit-b"),
+        ("results/fit-1.csv", "fit"),
+        ("results/model-a.json", None),
+        ("results/trace/model-.json", "trace"),
         ("results/trace", "trace"),
         ("results/trace/run-2/RESULTS.md", "trace"),
         ("results/trace/run-1/RESULTS.md", "runs"),
@@ -5258,6 +5283,23 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
             ck_info, stage_names=[item], interactive=False
         )
         assert set(gated) == expected
+    # A script's own environment failing to lock gates only stages running it
+    for name, wdir in [("inline", None), ("inline-wdir", "sub")]:
+        stages[name] = {"kind": "python-script", "script_path": "plot.py"}
+        if wdir is not None:
+            stages[name]["wdir"] = wdir
+    stages["inline-other"] = {
+        "kind": "python-script",
+        "script_path": "other.py",
+        "environment": None,
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=["inline", "inline-wdir", "inline-other"],
+        interactive=False,
+        failed_environments={os.path.join("sub", "plot.py"): "failed"},
+    )
+    assert gated == {"inline-wdir": "failed"}
 
 
 def test_get_gated_stages_for_apps_environments_are_built_with(

@@ -1441,6 +1441,50 @@ def test_check_envs_preloads_env_vars(tmp_dir, monkeypatch):
     subprocess.check_call(["calkit", "check", "envs"])
 
 
+def test_check_envs_locks_inline_scripts(tmp_dir):
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "pipeline": {
+                    "stages": {
+                        name: {
+                            "kind": "python-script",
+                            "script_path": f"{name}.py",
+                        }
+                        for name in ["ok", "bad"]
+                    }
+                }
+            },
+            f,
+        )
+    with open("ok.py", "w") as f:
+        f.write(
+            '# /// script\n# requires-python = ">=3.12"\n'
+            "# dependencies = []\n# ///\n"
+        )
+    with open("bad.py", "w") as f:
+        f.write("print('no block')\n")
+    # One at a time, by path, as a failed check says to
+    assert subprocess.call(["calkit", "check", "env", "-n", "ok.py"]) == 0
+    assert os.path.isfile("ok.py.lock")
+    res = subprocess.run(
+        ["calkit", "check", "env", "-n", "bad.py"],
+        capture_output=True,
+        text=True,
+    )
+    assert res.returncode != 0
+    assert "'# /// script' block" in res.stderr + res.stdout
+    # All together, with no environments defined
+    os.remove("ok.py.lock")
+    res = subprocess.run(
+        ["calkit", "check", "envs"], capture_output=True, text=True
+    )
+    assert res.returncode != 0
+    assert "Checking environment: 'ok.py'" in res.stdout
+    assert "bad.py" in res.stderr + res.stdout
+    assert os.path.isfile("ok.py.lock")
+
+
 def _project() -> None:
     """A project whose paper cites one computed value and types another."""
     subprocess.check_call(["calkit", "init"])

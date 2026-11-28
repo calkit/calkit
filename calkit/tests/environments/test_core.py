@@ -18,6 +18,7 @@ import calkit.cli.check
 import calkit.environments
 import calkit.environments.core
 import calkit.environments.texlive
+import calkit.pipeline
 import calkit.progress
 from calkit.environments.core import relock
 
@@ -2994,6 +2995,65 @@ def test_check_app_in_env(tmp_path, monkeypatch):
     # Environments whose commands don't run here aren't checked
     ck_info["environments"]["img"] = {"kind": "docker", "image": "x"}
     assert check_app_in_env("myapp", "img", ck_info) is None
+
+
+def test_check_all_in_pipeline_inline_scripts(tmp_dir):
+    block = (
+        '# /// script\n# requires-python = ">=3.12"\n'
+        "# dependencies = []\n# ///\n"
+    )
+    stages: dict = {
+        name: {"kind": "python-script", "script_path": f"{name}.py"}
+        for name in ["ok", "bad", "skipped", "frozen"]
+    }
+    stages["frozen"]["frozen"] = True
+    # One script per item, or one for all
+    stages["per-item"] = {
+        "kind": "python-script",
+        "script_path": "scripts/{n}.py",
+        "iterate_over": [{"arg_name": "n", "values": ["a", "b"]}],
+    }
+    stages["shared"] = {
+        "kind": "python-script",
+        "script_path": "ok.py",
+        "args": ["{n}"],
+        "iterate_over": [{"arg_name": "n", "values": [1, 2]}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump({"pipeline": {"stages": stages}}, f)
+    os.makedirs("scripts")
+    for path in ["ok.py", "skipped.py", "frozen.py", "scripts/a.py"]:
+        with open(path, "w") as f:
+            f.write(block)
+    with open("scripts/b.py", "w") as f:
+        f.write("print('no block')\n")
+    with open("bad.py", "w") as f:
+        f.write("print('no block')\n")
+    res = calkit.environments.check_all_in_pipeline(skip_stages=["skipped"])
+    a_path, b_path = (
+        os.path.join("scripts", "a.py"),
+        os.path.join("scripts", "b.py"),
+    )
+    assert set(res) == {"ok.py", "bad.py", a_path, b_path}
+    assert res["ok.py"]["success"]
+    assert res[a_path]["success"]
+    assert os.path.isfile("ok.py.lock")
+    assert os.path.isfile(a_path + ".lock")
+    for path in ["bad.py", b_path]:
+        assert not res[path]["success"]
+        assert "'# /// script' block" in res[path]["output"]
+    assert not os.path.exists("skipped.py.lock")
+    assert not os.path.exists("frozen.py.lock")
+    # Only the failed item can't run
+    gated, _ = calkit.pipeline.get_gated_stages(
+        calkit.load_calkit_info(),
+        interactive=False,
+        failed_environments={p: "failed" for p in ["bad.py", b_path]},
+    )
+    assert set(gated) == {"bad", "per-item@b"}
+    # Cached until a script changes
+    res = calkit.environments.check_all_in_pipeline(skip_stages=["skipped"])
+    assert res["ok.py"]["cached"]
 
 
 def test_check_all_in_pipeline_quiet(tmp_dir, monkeypatch, capfd):

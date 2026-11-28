@@ -661,6 +661,15 @@ def check_environment(
     dotenv.load_dotenv(dotenv_path=".env", verbose=verbose)
     ck_info = calkit.load_calkit_info()
     envs = ck_info.get("environments", {})
+    # A script that declares its own environment is named by its path
+    if env_name not in (envs or {}) and env_name.endswith(".py"):
+        from calkit.environments.inline import lock
+
+        if os.path.isfile(env_name):
+            try:
+                return lock(env_name, force=force, verbose=verbose)
+            except (ValueError, RuntimeError) as e:
+                raise_error(str(e))
     if not envs:
         raise_error("No environments defined in calkit.yaml")
     if isinstance(envs, list):
@@ -1069,11 +1078,34 @@ def check_environments(
 ) -> None:
     """Check that the project's environments are up to date.
 
-    Subprojects' environments are checked too, as 'calkit run' does.
+    Subprojects' environments are checked too, as 'calkit run' does, and so
+    are those that stages' scripts declare.
     """
+
+    def get_script_paths(info: dict) -> list[str]:
+        # Each item's, for an iterated stage that runs one script per item
+        from calkit.environments.inline import get_stage_script_path
+        from calkit.pipeline import get_stage_items
+
+        paths: list[str] = []
+        stages = (info.get("pipeline") or {}).get("stages") or {}
+        for name, stage in stages.items():
+            if not isinstance(stage, dict) or stage.get("frozen"):
+                continue
+            items = get_stage_items(name, stage, params=info.get("parameters"))
+            for item in items.values():
+                path = get_stage_script_path(item)
+                if path is not None and path not in paths:
+                    paths.append(path)
+        return paths
+
     ck_info = calkit.load_calkit_info()
     projects = list(calkit.iter_projects(ck_info=ck_info))
-    if not any(info.get("environments") for _, info in projects):
+    script_paths = {wdir: get_script_paths(info) for wdir, info in projects}
+    if not any(
+        info.get("environments") or script_paths[wdir]
+        for wdir, info in projects
+    ):
         typer.echo("No environments defined in calkit.yaml")
         return
     # Set any project-level environmental variables before checking
@@ -1084,11 +1116,14 @@ def check_environments(
         # A parent's variables apply to its subprojects even if it has no
         # environments of its own, as in 'calkit run'
         calkit.set_env_vars(ck_info=info, cli=True)
-        if not info.get("environments"):
+        if not info.get("environments") and not script_paths[wdir]:
             continue
         # check_environment reads the project it's in, so go there
         with calkit.in_project(wdir):
-            for env_name, env in info["environments"].items():
+            names = list(info.get("environments") or {})
+            names += [p for p in script_paths[wdir] if os.path.isfile(p)]
+            for env_name in names:
+                env = (info.get("environments") or {}).get(env_name) or {}
                 if env.get("kind") in calkit.environments.KINDS_NO_CHECK:
                     if verbose:
                         typer.echo(

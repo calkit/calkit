@@ -304,6 +304,18 @@ def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert "Not checking environment 'far' here" in res.stdout
     assert "Not checking stage 'remote' here" in res.stdout
     assert "CK_FAR" not in res.stdout + res.stderr
+    assert "CK_LAB" not in res.stdout
+    # With --verbose, each is listed under where it's declared
+    res = check("--verbose", env=every)
+    assert res.returncode == 0, res.stderr
+    for heading, line in [
+        ("the project", "CK_PROJECT: set"),
+        ("environment 'lab'", "CK_LAB: set"),
+        ("stage 'a'", "CK_A: set"),
+        ("stage 'b'", "CK_B: set"),
+    ]:
+        assert f"Checking requirements of {heading}\n  {line}\n" in res.stdout
+    assert "\n  git: " in res.stdout
     # Everything unmet is reported at once, by where it's declared
     res = check()
     assert res.returncode != 0

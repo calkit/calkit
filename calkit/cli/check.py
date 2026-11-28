@@ -1927,7 +1927,12 @@ def check_matlab_env(
 @check_app.command(name="reqs|requirements")
 def check_project_requirements(
     verbose: Annotated[
-        bool, typer.Option("--verbose", "-v", help="Print verbose output")
+        bool,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="List each requirement checked and how it's met.",
+        ),
     ] = False,
     no_cache: Annotated[
         bool,
@@ -1974,7 +1979,12 @@ def check_project_requirements(
             typer.echo(f"Checking requirements of {where}")
         try:
             calkit.check_requirements(
-                use_cache=not no_cache, checked=checked, **kwargs
+                use_cache=not no_cache,
+                checked=checked,
+                report=(lambda line: typer.echo(f"  {line}"))
+                if verbose
+                else None,
+                **kwargs,
             )
         except Exception as e:
             problems.append(f"{where}: {e}")

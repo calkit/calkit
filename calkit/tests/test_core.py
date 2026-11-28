@@ -700,6 +700,128 @@ def test_check_requirements_checks_machine_properties(tmp_dir):
     assert calkit.check_system_deps is calkit.check_requirements
 
 
+def test_check_requirements_reports_how_each_is_met(
+    tmp_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import shutil
+
+    import calkit.conda
+
+    # Conda off the PATH, where Calkit finds it anyway
+    home = tmp_dir / "home"
+    conda_path = home / "miniforge3" / "bin" / "conda"
+    conda_path.parent.mkdir(parents=True)
+    conda_path.touch()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setattr(
+        calkit.conda, "find_conda_exe", lambda: str(conda_path)
+    )
+    # LibreOffice on the PATH, as a binary named otherwise
+    bin_dir = tmp_dir / "bin"
+    bin_dir.mkdir()
+    soffice_path = bin_dir / (
+        "soffice.bat" if sys.platform == "win32" else "soffice"
+    )
+    soffice_path.touch(mode=0o755)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
+    soffice = calkit.docx.find_soffice()
+    assert soffice is not None
+    path_root = tmp_dir / "app"
+    path_root.mkdir()
+    monkeypatch.setenv("CK_SECRET", "hunter2")
+    monkeypatch.setenv("CK_APP_ROOT", str(path_root))
+    system_info = {
+        "cpu_count": 8,
+        "memory_gb": 15.5,
+        "os": "Linux",
+        "machine_id": "abc123",
+        "git_version": "git version 2.39.5",
+    }
+    requirements = [
+        "calkit>=0.1",
+        "conda",
+        "libreoffice",
+        "git>=2.30",
+        {"kind": "env-var", "name": "CK_SECRET"},
+        {"kind": "env-var-path", "name": "CK_APP_ROOT"},
+        {"kind": "cpu-count", "min": 2},
+        {"kind": "memory-gb", "min": 8, "max": 64},
+        {"kind": "os", "equals": ["linux", "darwin"]},
+        {"kind": "machine-id", "equals": "abc123"},
+        {"kind": "setup", "name": "ok", "check_command": "true"},
+    ]
+
+    def check(checked: dict | None = None) -> list[str]:
+        lines: list[str] = []
+        calkit.check_requirements(
+            requirements=requirements,
+            system_info=system_info,
+            interactive=False,
+            checked=checked,
+            report=lines.append,
+        )
+        return lines
+
+    lines = check()
+    assert lines == [
+        "cpu-count: 8 (min 2)",
+        "memory-gb: 15.5 (min 8, max 64)",
+        "os: Linux (equals 'linux' or 'darwin')",
+        "machine-id: matches",
+        "CK_SECRET: set",
+        f"CK_APP_ROOT: {path_root}",
+        f"calkit: {calkit.__version__}",
+        "conda: "
+        + os.path.join("~", "miniforge3", "bin", "conda")
+        + " (not on PATH)",
+        f"libreoffice: {soffice}",
+        f"git: {shutil.which('git')} (2.39.5)",
+        "ok: passed",
+    ]
+    # A secret's value is never shown, nor a machine's raw ID
+    assert not any("hunter2" in line or "abc123" in line for line in lines)
+    # A setup step's last pass is reused from the cache
+    cached = check()[-1]
+    assert cached.startswith("ok: passed ") and cached.endswith(
+        " ago (cached)"
+    )
+    # One checked before, e.g., for another stage, says so
+    checked: dict = {}
+    assert check(checked) == lines[:-1] + [cached]
+    assert check(checked) == [
+        f"{name}: checked above"
+        for name in [
+            "cpu-count",
+            "memory-gb",
+            "os",
+            "machine-id",
+            "CK_SECRET",
+            "CK_APP_ROOT",
+            "calkit",
+            "conda",
+            "libreoffice",
+            "git",
+            "ok",
+        ]
+    ]
+    # Git, which a project always needs, isn't checked twice when declared,
+    # however it's written
+    for git_req in [
+        "git>=2.30",
+        {"kind": "app", "name": "git", "version_spec": ">=2.30"},
+        {"git": {"version_spec": ">=2.30"}},
+    ]:
+        lines = []
+        calkit.check_requirements(
+            ck_info={"requirements": [git_req]},
+            system_info=system_info,
+            interactive=False,
+            report=lines.append,
+        )
+        assert lines == [f"git: {shutil.which('git')} (2.39.5)"]
+
+
 @pytest.mark.skipif(
     sys.platform == "win32", reason="Fakes an app with a shell script"
 )
@@ -936,7 +1058,11 @@ def test_check_dep_exists_conda_off_path(monkeypatch, tmp_path):
     import calkit.office
 
     for found in [True, False]:
-        monkeypatch.setattr(calkit.office, "app_installed", lambda app: found)
+        monkeypatch.setattr(
+            calkit.office,
+            "find_app_path",
+            lambda app: f"/Applications/{app}.app" if found else None,
+        )
         monkeypatch.setattr(
             calkit.docx,
             "find_soffice",

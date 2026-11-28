@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from unittest import mock
 
 import pytest
@@ -95,6 +96,7 @@ def test_check_setup_dep(tmp_dir):
     marker = tmp_dir / "marker"
     check_command = f"test -f {marker}"
     setup_command = f"touch {marker}"
+    reported: list[str] = []
     with mock.patch("builtins.input", return_value="y"):
         ok = reqs.check_setup_dep(
             {
@@ -104,9 +106,16 @@ def test_check_setup_dep(tmp_dir):
                 "setup_command": setup_command,
             },
             interactive=True,
+            report=reported.append,
         )
     assert ok is True
     assert marker.exists()
+    assert reported == ["gamma: passed after setup"]
+    # How long ago a cached pass was is in its largest whole unit
+    entry = {"passed_at": time.time() - 2 * 3600 - 120}
+    assert reqs.describe_cache_hit("gamma", entry) == (
+        "gamma: passed 2h ago (cached)"
+    )
     # Interactive "n" declines and returns False; setup does not run.
     not_run = tmp_dir / "not-run"
     with mock.patch("builtins.input", return_value="n"):

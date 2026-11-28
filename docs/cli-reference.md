@@ -4239,7 +4239,7 @@ Options:
 
 | Option            | Type    | Required | Default | Description                                                                                                                 |
 | ----------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `--verbose`, `-v` | boolean | no       | False   | Print verbose output                                                                                                        |
+| `--verbose`, `-v` | boolean | no       | False   | List each requirement checked and how it's met.                                                                             |
 | `--no-cache`      | boolean | no       | False   | Re-probe every setup requirement, ignoring (and clearing) the cache at .calkit/local/dep-checks.sqlite.                     |
 | `--stale`         | boolean | no       | False   | Only check what 'calkit run' needs now: the project's requirements, and those of out-of-date stages and their environments. |
 

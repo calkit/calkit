@@ -316,6 +316,18 @@ If that puts another stage using them out of date, it's offered next.
 Declining, or an install that fails, skips the stage as before,
 as does running without a terminal, e.g., in CI.
 
+Some skips still fail the run, after the stages that can run have run:
+
+- One of the stages named on the command line, e.g.,
+  `calkit run fetch`, is out of date and can't run.
+- A stage is out of date and can't run because something is wrong
+  rather than because the project says so, e.g., its machine can't be
+  reached, one of its environments failed its check, or the app one is
+  built with isn't installed.
+- Any stage is out of date and can't run, with `calkit run --strict`,
+  e.g., in CI for a project whose stages should all run there.
+  The `calkit/run` action takes it as `run_args: --strict`.
+
 <!-- TODO: needs human review -->
 
 `calkit check reqs` checks everything a machine needs to run the whole
@@ -328,17 +340,12 @@ the project's requirements, and those of the stages `calkit status`
 lists as out of date and of their environments.
 Both cover subprojects too.
 
-Some skips still fail the run, after the stages that can run have run:
+<!-- TODO: needs human review -->
 
-- One of the stages named on the command line, e.g.,
-  `calkit run fetch`, is out of date and can't run.
-- A stage is out of date and can't run because something is wrong
-  rather than because the project says so, e.g., its machine can't be
-  reached, one of its environments failed its check, or the app one is
-  built with isn't installed.
-- Any stage is out of date and can't run, with `calkit run --strict`,
-  e.g., in CI for a project whose stages should all run there.
-  The `calkit/run` action takes it as `run_args: --strict`.
+With `--verbose`, it lists each requirement it checks and how it's met,
+e.g., where an app was found and its version, or that a setup step's
+last pass was reused from the cache.
+An env var is only said to be set, since its value may be a secret.
 
 <!-- TODO: needs human review -->
 

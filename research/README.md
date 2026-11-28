@@ -3,13 +3,14 @@
 # Research
 
 Product research for Calkit:
-which problems in an analysis change its conclusions but get past auditors,
+what would get researchers to adopt it,
+which problems in an analysis change its conclusions, who finds them,
 and what would catch them.
-So far it points to an automatic data profile recorded at every stage
-boundary (rows in and out, values outside a column's usual pattern,
-duplicate keys, missingness),
-shown along the path a reader already takes from question to evidence to
-stage.
+An automatic data profile at every stage boundary catches the data
+problems auditors skip,
+but documented errors suggest those are a small share of what changes
+conclusions;
+most are modeling choices found by people with domain knowledge.
 Each question in `calkit.yaml` makes one step of that case,
 with its answer filled in from the pipeline's results.
 
@@ -62,3 +63,38 @@ problems, and whether a generic data profile flags them.
 - `results/hill-roberts-profile.json`: the archive's flags by file and
   column
 - `results/real-packages.md`: every audit in one table
+
+<!-- TODO: needs human review -->
+
+## Real-world errors
+
+Documented errors in published research and in research made by AI
+agents, coded from public notices and reports,
+to see which kinds change conclusions and who finds them.
+
+- `real-world-errors/errors.csv`: 316 errors in three samples that must
+  not be pooled: human-era general research (I4R replication reports,
+  Retraction Watch, Kapoor & Narayanan's leakage list), computational
+  physics and engineering errata (`field_group`), and agent-made research
+  (`era` is `agent`)
+- `real-world-errors/README.md`: columns, sampling, taxonomy, coding
+  rules, base rates for stale numbers, and limitations
+- `real-world-errors/build/`: the coding spec, per-route logs,
+  and the script that merged the coders' parts, kept as a record
+- `scripts/summarize-real-world-errors.py`: counts by sample, error type,
+  and impact, weighted changed 3, weakened 1, unclear 0.5, none 0,
+  and the share of weighted impact a data profile could catch
+  (sentinel codes, merges, and duplicate rows,
+  and separately with unit errors)
+- `results/real-world-errors.json` and `.md`: those counts
+
+<!-- TODO: needs human review -->
+
+## Adoption
+
+Whether question-driven development with a coding agent is what gets
+researchers to adopt Calkit, not yet tested.
+
+- `adoption/workshop-protocol.md`: how to test it at a workshop,
+  against figures that update themselves, installable research,
+  and running on a cluster from a laptop

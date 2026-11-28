@@ -1,0 +1,142 @@
+CPE stratum log (computational physics and engineering errata)
+
+Journals chosen up front, with ISSN used in the Crossref issn filter:
+ Physical Review Fluids 2469-990X; Physical Review E 2470-0045; Journal of Fluid Mechanics 0022-1120; AIAA Journal 0001-1452; Journal of Computational Physics 0021-9991; Geoscientific Model Development 1991-9603 (1991-959X returned nothing); Journal of Advances in Modeling Earth Systems 1942-2466; Journal of Climate 0894-8755; Applied Energy 0306-2619; Computers & Structures 0045-7949.
+
+Frame query: api.crossref.org/works?filter=issn:<ISSN>,from-pub-date:2018-01-01,until-pub-date:2025-12-31&query.bibliographic=<term>, for term in erratum, corrigendum, correction; 200 rows per page with cursor paging, stopping at the first page with no title matches (relevance-sorted). Titles kept if they start with Erratum/Corrigendum/Correction (to|:) or end with '- CORRIGENDUM'/'- ERRATUM' (JFM style). Titles like 'Correction of ...' (research papers) dropped. Generic User-Agent, 1 s sleeps.
+ Exception: GMD has no separate corrigenda after 2017 in Crossref (Copernicus now corrects in place), so its window was extended to 2008-2025; all 6 found are 2010-2014.
+ JAMES: the query returned no notices (Wiley errata not matched); logged as empty.
+ Limitation: relevance-based query may miss notices whose titles lack the terms.
+
+Access: notice text read by curl+HTML parsing (Cambridge JFM pages, AMS J. Climate pages), Copernicus PDFs via pdftotext (GMD), and OpenAlex abstract_inverted_index for APS, AIAA, and Elsevier (their sites return 403 to automated fetches). Notices with <25 words of text were counted unreadable.
+
+Sampling: I screened every readable notice (a census of the readable frame, not a sample), since screening was cheap once texts were fetched. All kept cases are coded in part_cpe.csv. To honor the 20-40 target, the selection column marks the first 40 kept cases in a seeded order (random.seed(20261127); random.shuffle of the sorted union of readable DOIs) as cpe_errata_census_seed20261127_first40; the rest are ..._overflow. Filter on that if you want exactly 40.
+
+Screening rule: keep notices citing a code bug, numerical or computational error, a processing/input error (units, calibration, conversion, wrong file), a methods-vs-code mismatch, or wrong values/figures relative to computed outputs (including typos in reported values, so stale vs typo can be compared). Screen out: equation typos or analytic derivation errors not propagated into computed results; author, affiliation, funding, citation, style, and publisher production errors; pure label/notation errors.
+
+Per-journal counts (frame / readable / kept / kept in first40):
+ Physical Review Fluids: 16 / 7 / 6 / 4
+ Physical Review E: 100 / 22 / 11 / 8
+ Journal of Fluid Mechanics: 103 / 103 / 31 / 16
+ AIAA Journal: 37 / 11 / 2 / 1
+ Journal of Computational Physics: 30 / 2 / 1 / 1
+ Geoscientific Model Development: 6 / 6 / 0 / 0
+ Journal of Advances in Modeling Earth Systems: 0 / 0 / 0 / 0
+ Journal of Climate: 23 / 23 / 18 / 8
+ Applied Energy: 77 / 3 / 2 / 2
+ Computers & Structures: 5 / 0 / 0 / 0
+ Total frame 397; kept 71.
+
+Screened-out notices (DOI: reason):
+ 10.1016/j.apenergy.2024.125114: index returned original abstract, not the notice (unreadable)
+ 10.1016/j.jcp.2018.11.017: scheme definition error; propagation not stated
+ 10.1017/jfm.2018.121: affiliation
+ 10.1017/jfm.2018.243: publisher error
+ 10.1017/jfm.2018.550: DOI assignment
+ 10.1017/jfm.2018.551: missing term in printed expressions; simulations included it
+ 10.1017/jfm.2018.847: copyright line
+ 10.1017/jfm.2018.997: missing figure credits
+ 10.1017/jfm.2019.1043: wrong figure (publisher)
+ 10.1017/jfm.2019.437: axis label
+ 10.1017/jfm.2019.536: author name
+ 10.1017/jfm.2019.916: equation error
+ 10.1017/jfm.2019.942: equation typo
+ 10.1017/jfm.2020.1076: author name
+ 10.1017/jfm.2020.165: author name
+ 10.1017/jfm.2020.167: dimensional form of equations (analytic)
+ 10.1017/jfm.2020.329: publisher error
+ 10.1017/jfm.2020.35: reference title
+ 10.1017/jfm.2020.357: analytic derivation assumption
+ 10.1017/jfm.2020.36: affiliation
+ 10.1017/jfm.2020.553: affiliation
+ 10.1017/jfm.2020.580: publisher error
+ 10.1017/jfm.2021.1008: figure labels (publisher)
+ 10.1017/jfm.2021.113: obituary correction
+ 10.1017/jfm.2021.1138: analytic model omission
+ 10.1017/jfm.2021.316: funding
+ 10.1017/jfm.2021.550: affiliation (publisher)
+ 10.1017/jfm.2021.675: obituary correction
+ 10.1017/jfm.2021.700: equation error; figures only need a parameter stated
+ 10.1017/jfm.2021.882: funding
+ 10.1017/jfm.2021.900: publisher typo
+ 10.1017/jfm.2021.982: acknowledgments
+ 10.1017/jfm.2022.172: analytic derivation error
+ 10.1017/jfm.2022.199: author details
+ 10.1017/jfm.2022.311: publisher equation typo
+ 10.1017/jfm.2022.64: author name
+ 10.1017/jfm.2022.715: spelling
+ 10.1017/jfm.2022.755: author name
+ 10.1017/jfm.2022.756: no informative text
+ 10.1017/jfm.2022.859: publisher equation typo
+ 10.1017/jfm.2023.1044: funding
+ 10.1017/jfm.2023.140: equation omission in text; numerics solved the correct equation
+ 10.1017/jfm.2023.216: equation omission in text; numerics solved the correct equation
+ 10.1017/jfm.2023.306: analytic derivation error (conclusion revised, but analytic, not computed)
+ 10.1017/jfm.2023.409: figure label (publisher)
+ 10.1017/jfm.2023.62: data availability link (publisher)
+ 10.1017/jfm.2023.810: typesetting (publisher)
+ 10.1017/jfm.2023.913: affiliation
+ 10.1017/jfm.2023.914: affiliation
+ 10.1017/jfm.2023.915: affiliation
+ 10.1017/jfm.2024.137: affiliation
+ 10.1017/jfm.2024.257: typographical errors, stated as not in code
+ 10.1017/jfm.2024.373: equation typo; results valid
+ 10.1017/jfm.2024.57: equation error; vanishes in the limit used
+ 10.1017/jfm.2025.10307: publisher posted non-final manuscript version
+ 10.1017/jfm.2025.10308: publisher production error
+ 10.1017/jfm.2025.10333: publisher posted non-final manuscript version
+ 10.1017/jfm.2025.10334: equation in text
+ 10.1017/jfm.2025.10364: author order
+ 10.1017/jfm.2025.10371: figure labels (publisher)
+ 10.1017/jfm.2025.10400: history dates
+ 10.1017/jfm.2025.10583: label and notation flips
+ 10.1017/jfm.2025.10584: equation typo; analysis used correct form
+ 10.1017/jfm.2025.10646: symbols in figure inconsistent with caption (labeling)
+ 10.1017/jfm.2025.10663: author contributions
+ 10.1017/jfm.2025.10745: affiliation
+ 10.1017/jfm.2025.10746: analytic error confined to appendix
+ 10.1017/jfm.2025.10762: analytic linear-algebra error
+ 10.1017/jfm.2025.10916: algebraic/index error in equations (analytic)
+ 10.1017/jfm.2025.15: affiliation
+ 10.1017/jfm.2025.210: publisher posted non-final manuscript version
+ 10.1017/jfm.2025.340: missing citation
+ 10.1017/jfm.2025.341: style
+ 10.1017/jfm.2025.375: style
+ 10.1103/physreve.100.019901: misprints
+ 10.1103/physreve.100.029901: missing citation
+ 10.1103/physreve.100.039902: analytic error in an expression
+ 10.1103/physreve.100.069901: misprint; simulations used correct formulas
+ 10.1103/physreve.101.029903: symbol typo; results unaffected
+ 10.1103/physreve.101.039903: equation error; implementation not stated
+ 10.1103/physreve.101.059901: analytic perturbative error
+ 10.1103/physreve.104.019902: equation typos
+ 10.1103/physreve.104.039903: analytic derivation
+ 10.1103/physreve.105.029901: analytic condition
+ 10.1103/physreve.99.069903: no notice text (metadata only)
+ 10.1103/physrevfluids.7.099902: no notice text (metadata only)
+ 10.1175/jcli-d-17-0784.1: algebraic errors in appendix; results unaffected
+ 10.1175/jcli-d-18-0850.1: equation typo; experiments forced correctly
+ 10.1175/jcli-d-20-0283.1: equation sign error; correct formula used
+ 10.1175/jcli-d-22-0614.1: equation typos; results computed with correct equations
+ 10.1175/jcli-d-22-0729.1: equation typo; analyses used correct formula
+ 10.2514/1.j055824.c1: equation errors; propagation not stated
+ 10.2514/1.j056021.c1: author initial
+ 10.2514/1.j058671.c1: figure captions misplaced (layout)
+ 10.2514/1.j059140.c1: wording and incomplete proof
+ 10.2514/1.j059489: not a notice (a turbulence-model correction paper)
+ 10.2514/1.j059981.c1: equation normalization typo
+ 10.2514/1.j060253.c1: definition in methods; propagation not stated (abstract truncated)
+ 10.2514/1.j061630.c1: abstract clarification
+ 10.2514/1.j061771.c1: definition in methods; propagation not stated (abstract truncated)
+ 10.5194/gmd-3-413-2010: author or affiliation detail
+ 10.5194/gmd-6-245-2013: figure omitted from paper
+ 10.5194/gmd-7-1517-2014: word omitted from abstract (production)
+ 10.5194/gmd-7-2001-2014: affiliation (production)
+ 10.5194/gmd-7-2409-2014: wrong figure inserted during production
+ 10.5194/gmd-7-2501-2014: affiliation (production)
+
+Unreadable (no notice text reachable): most AIAA (25), Applied Energy (74), JCP (28), Computers & Structures (5), PRE (~78), PRF (9). These are excluded from screening; Elsevier journals are therefore nearly absent, which skews the stratum toward JFM and J. Climate.
+
+Staleness coding: stale_result only when the notice says the figure/value came from an earlier version of code, inputs, or selection; transcription only when it says typo; otherwise unspecified with mismatch_cause=unclear. Result across 71 kept: stale 1 (CPE-47, Messori et al. 2018, figures from an event set before later exclusions; overflow row), typo 2, unclear 17, not a text-output mismatch 51.
+
+Related observations: three JFM notices (2025) say the publisher posted a non-final version of the article (a production-side stale version), and one GMD notice says the wrong figure was inserted during production; both screened out as publisher errors but relevant to staleness. CPE-6's figure error also appears in the first author's thesis. I did not search systematically for thesis errata; no systematic source found in this pass.

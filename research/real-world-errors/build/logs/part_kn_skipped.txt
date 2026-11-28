@@ -1,0 +1,46 @@
+Kapoor & Narayanan slice: fields and sources skipped
+Frame: the 41-row table at https://reproducible.cs.princeton.edu/ (30 distinct
+fields). Rule: per field, sources in table order; take the first paper the
+source names as affected; fall through to the field's next source if none.
+The political science row (K&N's own civil war case study) contributes all 4
+papers they found leakage in.
+
+Fields with no case taken:
+- Nutrition research (Ivanescu et al. 2016): methods overview; no paper named.
+- Software engineering (Tu et al. 2018): ACM full text not accessible; no
+  affected paper identifiable.
+- Clinical epidemiology (Christodoulou et al. 2019): systematic review
+  reporting aggregate validation bias (48/71 studies); no paper named in
+  accessible text.
+- Tractography (Poulin et al. 2019): survey; abstract names no paper; full
+  text paywalled.
+- Molecular biology (Park & Marcotte 2012; Urban et al. 2020; Li et al. 2022):
+  first two describe the problem generally or test anonymized methods (named
+  only in supplementary tables); Li 2022 paywalled.
+- Neuropsychiatry (Poldrack et al. 2020; Shim et al. 2021): Poldrack is an
+  aggregate review; Shim demonstrates on simulated and own EEG data. No paper
+  named in accessible text (Shim full text not read in full).
+- IT operations (Lyu et al. 2021): empirical study of splitting choices; no
+  affected paper identified (full text not accessible).
+- Radiology (Roberts et al. 2021; Gidwani et al. 2023): Nature MI and RSNA
+  pages blocked; secondary summaries describe "Frankenstein" datasets and
+  pediatric controls without naming a paper.
+- Genomics (Barnett et al. 2022): medRxiv blocked; meta-regression of
+  aggregate study features.
+- Genetics (Whalen et al. 2022): review; abstract names no paper; paywalled.
+- Sustainable energy (Geslin et al. 2023): perspective reanalyzing the
+  Severson battery dataset; shows charging-data features leak protocol
+  information but doesn't single out a published model as flawed, so the
+  affected paper is ambiguous.
+- Ecology (Stock et al. 2023): Nature E&E and Zenodo copies blocked; lab
+  summary names no paper.
+- Mining (Munagala et al. 2024): survey; not checked in depth, no paper
+  identified.
+
+Field where the first source named no paper and a later source was used:
+- Medicine: Bouwmeester et al. 2012 names no paper -> Chiavegatto Filho et
+  al. 2021 (KN-2). Vandewiele et al. 2021 (medicine, later row) names Fergus
+  et al. 2013 PLoS One (SMOTE before splitting; reported AUC 0.92 reproduced
+  only with the flaw) but was not taken under the one-per-field rule.
+- Neuroimaging: Whelan & Garavan 2014 names no paper -> Ahmed et al. 2022
+  TPAMI (KN-3).

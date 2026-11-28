@@ -1,0 +1,78 @@
+Agent-era sample, part A (Sakana AI Scientist sources and critiques; Agents4Science 2025)
+41 rows: AG-S-1..21 (AI Scientist and critiques), AG-A-1..20 (Agents4Science).
+Coded 2026-11-27.
+
+SOURCES USED, WITH SELECTION RULES
+- agent_sakana_v1_self_disclosed_all_specific (AG-S-1..8): Lu et al. 2024, The AI Scientist,
+  https://arxiv.org/abs/2408.06292 (HTML full text, Secs. 5, 6, 8). Took each specific error
+  instance in presentation order. Left out quality or style remarks (short bibliographies,
+  intermediate results shown, missing related work, LaTeX and layout failures, Q-learning
+  suitability), the vague "struggles to compare magnitudes" remark, and StyleFusion's
+  undisclosed random style labels (too uncertain). Merged the self-relaunch and 1 TB checkpoint
+  incidents into one unrequested_change row.
+- agent_sakana_v2_self_review_all_specific (AG-S-9..12): Yamada et al. 2025, AI Scientist-v2,
+  https://arxiv.org/abs/2504.08066, Sec. 4.2 (the authors' own review of the workshop paper),
+  plus Sakana's blog https://sakana.ai/ai-scientist-first-publication/ (LSTM citation error).
+  Left out the "limited evaluation" remark (scope) and merged the terminology confusion into
+  the regularizer row and the Fig. 3 caption into the Fig. 5 row.
+- agent_sakana_critique_beel2025_all_specific (AG-S-13..17): Beel, Kan & Baumgart 2025,
+  https://arxiv.org/abs/2502.14297 (v3 HTML). Took every specific flaw except failed runs that
+  produced no paper (42% of experiments), weak and old citations (not fabricated), the
+  placeholder and structural text, and the AI reviewer's behavior. Base rates from the source:
+  12 ideas, 7 runs completed, 7 manuscripts, 4 of 7 with wrong or hallucinated numbers.
+- agent_luo2025_hidden_pitfalls_all_modes (AG-S-18..21): Luo, Kasirzadeh & Shah 2025,
+  https://arxiv.org/abs/2509.08713 (exists; v2, Dec 2025). One row per failure mode studied
+  (benchmark selection, data leakage/data substitution, metric misuse, post-hoc selection).
+  These are controlled experiments that induce failures, not natural incidents; rates are in
+  the notes.
+- agent_agents4science_code_audits_all_flagged (AG-A-1..15): the venue's agentic codebase
+  audits of all 48 accepted papers, from
+  https://agents4science.stanford.edu/data/code_audits/codebase_audits_results.csv, with
+  reports at https://agents4science.stanford.edu/audits/audit_<id>.html. Rule: every accepted
+  paper whose audit result was CRITICAL, PARTIAL, or FAILED (14 papers, IDs 40, 64, 77, 122,
+  168, 206, 258, 269, 287, 291, 295, 300, 325, 344). Each paper gets one row, coded on the
+  auditor's first-listed critical issue, with secondary issues in the notes. AG-A-15 is an
+  aggregate none_found row for the 25 that PASSED. Not coded: 7 accepted papers with NO
+  CODEBASE (161 and 207 were audit ERRORs from corrupt zips; 130, 135, 194, 200, 212, 278 and
+  340 had no codebase). The autonomy levels in the citations come from
+  https://agents4science.stanford.edu/data/papers.csv. The auditor was itself an AI agent
+  (reports say Claude Code), so its findings are not checked by a human, hence confidence
+  medium or low. In one report (206) it was wrong in a way that is itself an agent error: it
+  called a real model and API nonexistent. That is noted in the row and not coded separately.
+- agent_agents4science_organizers_report_all_specific (AG-A-16..20): Bianchi, Queen, Thakkar,
+  Sun & Zou 2025, https://arxiv.org/abs/2511.15534 (PDF text extracted). Took every error
+  instance or class the report names: reference hallucination (aggregate), author-reported
+  overclaiming (aggregate), the biomarker inconsistency, the R^2 text-vs-table mismatch, and
+  suspected cherry-picking. Left out two submissions with prompt injections aimed at the AI
+  reviewers (there's no telling whether a human or an agent inserted them), and sycophantic AI
+  reviews (a reviewer error, not a research error).
+
+SOURCES NOT FOUND OR NOT USABLE
+- OpenReview reviews for Agents4Science (venue Agents4Science/2025/Conference): the API
+  returns a bot "challenge" (403), so individual reviews were not read. The venue's audit
+  table and the organizers' report were used instead.
+- https://agents4science.stanford.edu/submissions.html renders its table with JavaScript; I
+  read the underlying CSVs it loads.
+
+FOUND BUT NOT CODED (possible addition for the parent)
+- Miyai et al. 2025, "Jr. AI Scientist and Its Risk Report", https://arxiv.org/abs/2511.04583.
+  It's an AI-scientist system whose earlier papers were submitted to Agents4Science and
+  rejected. It documents about 9 specific failures: fabricated numbers in high-scoring papers,
+  irrelevant citations, ambiguous method descriptions, figures misread, auxiliary experiments
+  described but never run, a false gain from per-batch normalization with single-class batches
+  (leakage via batch statistics), ablations invented after AI-reviewer feedback
+  (reward_hacking), and bib-file tampering with nonexistent papers. Not coded because it falls
+  outside the two assigned sources and the row target.
+
+JUDGMENT CALLS
+- I didn't confirm whether a text-vs-output mismatch was a typo, a stale run, or invented. When
+  the source doesn't say, I coded `unspecified` (AG-A-2, AG-A-18), except AG-A-19, a single
+  number, which I coded transcription with low confidence. AG-S-14 is stale_result because the
+  baseline was never rerun.
+- Silent swaps of the specified benchmark for a subsample or synthetic data (AG-S-18) are
+  coded unrecorded_decision, not fabricated_result.
+- AG-A-14 and AG-A-8 were mostly human-led by their own disclosure (category A/B); the
+  Agents4Science rows mix agent and human work, so "agent era" there means AI-first-author
+  papers, not fully autonomous ones.
+- The impact of reward_hacking and unrequested_change incidents is coded none because they
+  didn't touch reported results.

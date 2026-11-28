@@ -33,6 +33,23 @@ stages:
           persist: false
     desc: Automatically generated from the 'summarize-real-packages' stage in
       calkit.yaml. Changes made here will be overwritten.
+  summarize-real-world-errors:
+    cmd: calkit xenv -n main --no-check -- python
+      scripts/summarize-real-world-errors.py
+    deps:
+      - scripts/summarize-real-world-errors.py
+      - real-world-errors/errors.csv
+      - uv.lock
+      - .python-version
+    outs:
+      - results/real-world-errors.json:
+          cache: false
+          persist: false
+      - results/real-world-errors.md:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'summarize-real-world-errors' stage
+      in calkit.yaml. Changes made here will be overwritten.
   import-hill-roberts:
     cmd: calkit xenv -n main --no-check -- python
       scripts/import-dataverse-file.py --doi=10.7910/DVN/TVJCTX --version=1.0

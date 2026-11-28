@@ -117,3 +117,32 @@ stages:
       hash: md5
       md5: d7861ba58b11e598b26c20f9dab0c473
       size: 1940
+  summarize-real-world-errors:
+    cmd: calkit xenv -n main --no-check -- python 
+      scripts/summarize-real-world-errors.py
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: real-world-errors/errors.csv
+      hash: md5
+      md5: d545e2ba12daf6f9da153516b19f1fc4
+      size: 186648
+    - path: scripts/summarize-real-world-errors.py
+      hash: md5
+      md5: 6dd9a3cc80fc382763cecbdd02772a52
+      size: 8163
+    - path: uv.lock
+      hash: md5
+      md5: 63a043152c18580990584c2cf682d069
+      size: 39173
+    outs:
+    - path: results/real-world-errors.json
+      hash: md5
+      md5: d20f57f2bed4eedbf2d5d43c8ac06c1b
+      size: 14687
+    - path: results/real-world-errors.md
+      hash: md5
+      md5: 388c0483ffd6c7dbf522857e195c70b7
+      size: 3685

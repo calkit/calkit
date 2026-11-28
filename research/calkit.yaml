@@ -1,11 +1,35 @@
 name: research
 title: Research
 description: >-
-  Product research for Calkit: which problems in an analysis change its
-  conclusions but get past auditors, and what would catch them, run in
-  studies and rounds that add to the record rather than replace it.
+  Product research for Calkit: what would get researchers to adopt it,
+  which problems in an analysis change its conclusions, who finds them, and
+  what would catch them, run in studies and rounds that add to the record
+  rather than replace it.
 
 questions:
+  # TODO: needs human review
+  - question: >-
+      What would get researchers to adopt Calkit, with reproducibility as a
+      side effect?
+    hypothesis: >-
+      Question-driven development with a coding agent, like test-driven
+      development for research: a person writes a question with its
+      hypothesis and approach, an agent builds the pipeline and evidence
+      that answer it, and the person reviews the approach, checks the
+      outputs, and signs off; when inputs change, the answer goes stale and
+      the question is open again.
+    approach: >-
+      At a workshop, each participant takes one question about their own
+      data through that loop with an agent in Calkit, compared with asking
+      the agent to make a figure, and is interviewed on the alternatives:
+      figures and numbers that update themselves (revisions without the
+      redo), others being able to use the research (installable packages),
+      and running on a cluster from a laptop.
+    notes: >-
+      Not yet tested. Open until the workshop in
+      adoption/workshop-protocol.md is run and its sessions are summarized
+      by a stage.
+
   - question: >-
       With unlimited reading, do agent auditors need a research tool to find
       the bugs in a small analysis?
@@ -168,27 +192,101 @@ questions:
           hhi_n: files.data/LucidWideFile.csv.flags.lucid_hhi.0.n
           hhi_code: files.data/LucidWideFile.csv.flags.lucid_hhi.0.examples.0
 
+  # TODO: needs human review
   - question: >-
-      What would catch the problems that change conclusions but that
-      auditors skip?
+      Which kinds of errors change conclusions in real research, and who
+      finds them?
     answer:
-      if v2_merge == 0 and hr_found < hr_n and n_flags > 0: >-
-        Checks of the data recorded for the auditor rather than left to
-        them. The problems missed that were in the package to find are
-        ones found only by looking at the data itself: the merge that
-        dropped a site, missed by all {v2_merge_n} auditors at a person's
-        reading speed, and a sentinel code used as data, found by only
-        {hr_found} of {hr_n} with unlimited reading. Auditors skip that work
-        when time is short or the code looks right, while cheap checks,
-        e.g., typed numbers against saved outputs, got done. A generic profile flagged the sentinel with no
-        knowledge of it ({n_flags} flags in all), so recording one at every
-        stage boundary, i.e., rows in and out, values outside a column's
-        usual pattern, duplicate keys, and missingness, and showing it
-        along the path a reader already takes from question to evidence to
-        stage, should catch both. A problem in a step left out of the
-        package, like Muchlinski et al.'s leakage, needs the step itself.
-        Untested: whether auditors read the profile when it's shown, and how
-        many false flags it raises across more packages.
+      if g_mod * 2 > g_spec and g_person * 2 > g_changed and g_prof_u < 0.15 and pe_prof_u < 0.15 and g_stale_c == 0 and pe_stale_c == 0 and ag_top == "spec_mismatch" and g_write == 0 and pe_write == 0 and ag_write > 0: >-
+        In published human research, mostly wrong models, formulas, and
+        readings of results, found by people rather than tools. Of the
+        {g_changed} errors that changed a conclusion in general research,
+        {g_spec} have a stated mechanism, and {g_mod} of those are
+        calculation errors, leakage, misread results, wrong variables, or
+        inference errors; in computational physics and engineering errata,
+        {pe_mod} of {pe_changed} are calculation or numerical-method
+        errors. In general research, {g_person} of the {g_changed} were
+        found by the authors, readers, or someone with domain knowledge;
+        rerunning code found {g_reran} and profiling data {g_profiled}.
+        Errors a generic data profile could catch (sentinel codes, merges,
+        and duplicate rows) are {g_prof:.0%} of general research's weighted
+        impact and {pe_prof:.0%} of the errata's, or {g_prof_u:.0%} and
+        {pe_prof_u:.0%} counting unit errors. Documented stale results are
+        nearly absent ({g_stale} in general research, {pe_stale} in the
+        errata, none changing a conclusion), but a stale result caught
+        before publication leaves no public record, so near-misses can't
+        appear here. In the agent sample, methods text that doesn't match
+        the code is the largest answer-changer ({ag_top_n} of {ag_changed}),
+        found mostly by reading the code ({ag_read} of {ag_changed}), and
+        errors introduced in writing, e.g., overclaiming and fabricated
+        results, changed or weakened conclusions only there ({ag_write}).
+        Caveats: the three samples aren't pooled, since each route selects
+        differently, so impact largely reflects the route, e.g., retractions
+        are nearly all answer-changing; the taxonomy added types per sample; and
+        every row was coded in a single AI pass from public documents,
+        {n_unsure} of {n_rows} at medium or low confidence.
+      else: >-
+        Not settled; see results/real-world-errors.md for each sample.
+    evidence:
+      - kind: result
+        path: results/real-world-errors.json
+        values:
+          n_rows: n_rows
+          n_unsure: n_low_or_medium_confidence
+          g_changed: samples.general.changed.n
+          g_spec: samples.general.changed.n_specified
+          g_mod: samples.general.changed.n_modeling
+          g_person: samples.general.changed.n_found_by_person
+          g_reran: samples.general.changed.by_how_found.reran_code
+          g_profiled: samples.general.changed.by_how_found.profiled_data
+          g_prof: samples.general.profile_catchable.core.share
+          g_prof_u: samples.general.profile_catchable.with_units.share
+          g_stale: samples.general.stale.n
+          g_stale_c: samples.general.stale.n_changed
+          g_write: samples.general.n_writing_stage
+          pe_changed: samples.physics_engineering.changed.n
+          pe_mod: samples.physics_engineering.changed.n_modeling
+          pe_prof: samples.physics_engineering.profile_catchable.core.share
+          pe_prof_u: samples.physics_engineering.profile_catchable.with_units.share
+          pe_stale: samples.physics_engineering.stale.n
+          pe_stale_c: samples.physics_engineering.stale.n_changed
+          pe_write: samples.physics_engineering.n_writing_stage
+          ag_changed: samples.agent.changed.n
+          ag_top: samples.agent.changed.top_type
+          ag_top_n: samples.agent.changed.top_type_n
+          ag_read: samples.agent.changed.by_how_found.read_code
+          ag_write: samples.agent.n_writing_stage
+      - kind: table
+        path: results/real-world-errors.md
+
+  # TODO: needs human review
+  - question: >-
+      What would catch the problems that change conclusions, including
+      those auditors skip?
+    answer:
+      if v2_merge == 0 and hr_found < hr_n and n_flags > 0 and g_prof_u < 0.15 and pe_prof_u < 0.15 and g_mod * 2 > g_spec and ag_top == "spec_mismatch": >-
+        Not settled, but a data profile alone isn't it. A profile recorded
+        at each stage boundary cheaply catches the problems auditors skip
+        because they need a look at the data itself: generic rules flagged
+        Hill & Roberts' sentinel code with no knowledge of it ({n_flags}
+        flags in all), which only {hr_found} of {hr_n} auditors found, and
+        row counts in and out of the merge would show round 3's dropped
+        site, which none of {v2_merge_n} auditors at reading speed caught.
+        In published research, though, that class is a small share of what
+        changes conclusions: {g_prof:.0%} of weighted impact in general
+        research and {pe_prof:.0%} in computational physics and engineering
+        errata ({g_prof_u:.0%} and {pe_prof_u:.0%} counting unit errors).
+        Most answer-changing errors there are in modeling, calculation, and
+        interpretation ({g_mod} of {g_spec} with a stated mechanism), found
+        by authors, readers, and domain experts ({g_person} of
+        {g_changed}).
+        So the larger lever is likely making the parameters and choices
+        behind each answer cheap for an expert to inspect and vary, and,
+        for agent work, checking that the methods text matches the
+        pipeline, since that mismatch is the largest answer-changer in the
+        agent sample ({ag_top_n} of {ag_changed}). Untested: whether either
+        helps experts find more, and whether auditors read a profile when
+        it's shown.
       else: >-
         Not settled; see the answers to the questions above.
     evidence:
@@ -206,6 +304,20 @@ questions:
         path: results/hill-roberts-profile.json
         values:
           n_flags: n_flags
+      - kind: result
+        path: results/real-world-errors.json
+        values:
+          g_changed: samples.general.changed.n
+          g_spec: samples.general.changed.n_specified
+          g_mod: samples.general.changed.n_modeling
+          g_person: samples.general.changed.n_found_by_person
+          g_prof: samples.general.profile_catchable.core.share
+          g_prof_u: samples.general.profile_catchable.with_units.share
+          pe_prof: samples.physics_engineering.profile_catchable.core.share
+          pe_prof_u: samples.physics_engineering.profile_catchable.with_units.share
+          ag_changed: samples.agent.changed.n
+          ag_top: samples.agent.changed.top_type
+          ag_top_n: samples.agent.changed.top_type_n
 
 environments:
   main:
@@ -242,6 +354,21 @@ pipeline:
         - path: results/real-packages.json
           storage: git
         - path: results/real-packages.md
+          storage: git
+    summarize-real-world-errors:
+      kind: python-script
+      script_path: scripts/summarize-real-world-errors.py
+      environment: main
+      description: >-
+        Tabulate the coded real-world errors by sample, never pooled: counts
+        by type and impact, where and how answer-changing errors arose and
+        were found, and the share a data profile could catch.
+      inputs:
+        - real-world-errors/errors.csv
+      outputs:
+        - path: results/real-world-errors.json
+          storage: git
+        - path: results/real-world-errors.md
           storage: git
     import-hill-roberts:
       kind: python-script
@@ -294,6 +421,17 @@ datasets:
       description: >-
         Harvard Dataverse doi:10.7910/DVN/TVJCTX, version 1.0, file
         6558488.
+  - path: real-world-errors/errors.csv
+    title: Errors in research data analysis, a coded sample
+    description: >-
+      316 documented errors in published research and agent-made research,
+      from I4R replication reports, Retraction Watch, Kapoor & Narayanan's
+      leakage list, computational physics and engineering errata, and
+      evaluations of AI research agents, coded by an AI agent from public
+      documents. See real-world-errors/README.md.
+    created_by:
+      email: petebachant@gmail.com
+      with_ai: Claude Opus 5.5
 
 tables:
   - path: results/audit-speed.md
@@ -308,3 +446,11 @@ tables:
       Each agent audit of a published replication package with publicly
       documented problems: which of them it found, and what else it raised.
     stage: summarize-real-packages
+  - path: results/real-world-errors.md
+    title: Errors in published and agent research by type and impact
+    description: >-
+      Coded errors from published notices and reports, in three samples
+      kept apart (human-era general research, computational physics and
+      engineering errata, and agent-made research), by error type and
+      impact, with the share a data profile could catch.
+    stage: summarize-real-world-errors

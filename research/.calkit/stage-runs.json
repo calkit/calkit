@@ -74,5 +74,24 @@
       "cpu_count": 10,
       "memory_gb": 64.0
     }
+  },
+  "summarize-real-world-errors": {
+    "start_time": "2026-11-28T02:15:20.023000",
+    "end_time": "2026-11-28T02:15:20.465000",
+    "environment": "main",
+    "git_rev": "db5c13cf23d0279d6202c9867b6bba841303099e",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:8461a3ae186df63315276cd9e4eb8faf9c45b362aee878bf2930ac623c503697",
+    "calkit_version": "0.53.2.dev20+gdb5c13cf2",
+    "calkit_git_rev": "db5c13cf23d0279d6202c9867b6bba841303099e",
+    "system": {
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.2.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
+    }
   }
 }

@@ -64,6 +64,43 @@ def frozen_stage_base_names(
     return names
 
 
+def get_frozen_changes(wdir: str | None = None) -> dict[str, list[str] | None]:
+    """What changed since each frozen stage's outputs were made, by its name
+    in ``dvc.lock``: the inputs and outputs that differ from what
+    ``dvc.lock`` records, empty for one whose command changed, or None for
+    one as current as if it weren't frozen.
+
+    Reads just this project's dvc.yaml. Raises if DVC can't read the
+    stages, e.g., while another process holds its lock.
+    """
+    import dvc.repo
+
+    changes: dict[str, list[str] | None] = {}
+    dvc_repo = calkit.dvc.get_dvc_repo(wdir)
+    try:
+        dvc_yaml = os.path.join(os.path.abspath(wdir or "."), "dvc.yaml")
+        with dvc.repo.lock_repo(dvc_repo):
+            for stage in dvc_repo.stage.load_all(path=dvc_yaml):
+                if not stage.frozen:
+                    continue
+                stage.frozen = False
+                found: list = next(iter(stage.status().values()), [])
+                changes[stage.name] = (
+                    [
+                        Path(path).as_posix()
+                        for item in found
+                        if isinstance(item, dict)
+                        for key in ("changed deps", "changed outs")
+                        for path in item.get(key) or {}
+                    ]
+                    if found
+                    else None
+                )
+    finally:
+        dvc_repo.close()
+    return changes
+
+
 def get_downstream_stage_names(
     stage_names: set[str], wdir: str | None = None
 ) -> set[str]:
@@ -131,7 +168,9 @@ def get_downstream_stage_names(
 
 
 def frozen_tainted_stage_names(
-    ck_info: dict | None = None, wdir: str | None = None
+    ck_info: dict | None = None,
+    wdir: str | None = None,
+    frozen_changes: dict[str, list[str] | None] | None = None,
 ) -> set[str]:
     """Base names of out-of-date frozen stages, plus every stage downstream.
 
@@ -141,7 +180,8 @@ def frozen_tainted_stage_names(
     of naming them here: an answer resting on one of those outputs is
     resting on whatever the stage last happened to produce. One whose deps
     and outs still match ``dvc.lock`` is left out, since it's as current as
-    if it weren't frozen.
+    if it weren't frozen, as ``frozen_changes`` says, from
+    :func:`get_frozen_changes` if not given.
 
     Read from ``dvc.lock`` where there is one, since its deps and outs are
     concrete, falling back to ``dvc.yaml``. Names come back without their
@@ -153,29 +193,17 @@ def frozen_tainted_stage_names(
     if not tainted:
         return set()
     # One whose deps and outs still match dvc.lock is as current as any
-    # other stage, so only one that would be out of date if unfrozen taints;
-    # reading just this project's dvc.yaml keeps that cheap
+    # other stage, so only one that would be out of date if unfrozen taints
     try:
-        import dvc.repo
-
-        dvc_repo = calkit.dvc.get_dvc_repo(wdir)
-        try:
-            dvc_yaml = os.path.join(os.path.abspath(wdir or "."), "dvc.yaml")
-            current: set[str] = set()
-            changed: set[str] = set()
-            with dvc.repo.lock_repo(dvc_repo):
-                for stage in dvc_repo.stage.load_all(path=dvc_yaml):
-                    base = stage.name.split("@")[0]
-                    if base not in tainted or not stage.frozen:
-                        continue
-                    stage.frozen = False
-                    if stage.changed():
-                        changed.add(base)
-                    else:
-                        current.add(base)
-            tainted -= current - changed
-        finally:
-            dvc_repo.close()
+        if frozen_changes is None:
+            frozen_changes = get_frozen_changes(wdir)
+        current = {
+            n.split("@")[0] for n, c in frozen_changes.items() if c is None
+        }
+        changed = {
+            n.split("@")[0] for n, c in frozen_changes.items() if c is not None
+        }
+        tainted -= current - changed
     except Exception:
         pass
     return get_downstream_stage_names(tainted, wdir=wdir)
@@ -2406,6 +2434,116 @@ def get_live_lock_stages(lock_stages: dict, yaml_stages: dict) -> dict:
             continue
         live[stage_name] = lock_stage
     return live
+
+
+def get_stage_status(stale: list, has_run: bool) -> dict:
+    """A stage's status, as the hub gives it, from DVC's stale entries for
+    it, i.e., one per iteration that's out of date.
+    """
+    if not has_run:
+        state = "not-run"
+    elif not stale:
+        state = "up-to-date"
+    elif all(s.always_run for s in stale):
+        state = "always-run"
+    else:
+        state = "stale"
+    return {
+        "status": state,
+        "modified_command": any(s.modified_command for s in stale),
+        "modified_inputs": list(
+            dict.fromkeys(p for s in stale for p in s.modified_inputs)
+        ),
+        "modified_outputs": list(
+            dict.fromkeys(p for s in stale for p in s.modified_outputs)
+        ),
+        "missing_outputs": list(
+            dict.fromkeys(p for s in stale for p in s.stale_outputs)
+        ),
+    }
+
+
+def get_summary(wdir: str) -> dict:
+    """A checkout's pipeline as the hub summarizes one: the stages in
+    calkit.yaml's order, each one's status here, and the compiled DVC
+    stages, with what each runs, reads, and makes, plus what changed since
+    each out-of-date frozen stage's outputs were made.
+
+    Environments aren't checked, since that can build them, which a look
+    at the pipeline shouldn't do.
+    """
+    import calkit.dvc
+
+    ck_info = calkit.load_calkit_info(wdir=wdir, read_only=True)
+    ck_stages = list((ck_info.get("pipeline") or {}).get("stages") or {})
+    prev_wdir = os.getcwd()
+    try:
+        os.chdir(wdir)
+        status = get_status(
+            ck_info=ck_info,
+            check_environments=False,
+            clean_notebooks=True,
+            compile_to_dvc=True,
+            quiet_environment_checks=True,
+        )
+        dvc_stages = calkit.dvc.read_pipeline().get("stages", {})
+        lock_stages = calkit.dvc.read_lock_stages()
+        try:
+            frozen_changes = get_frozen_changes(".")
+        except Exception:
+            frozen_changes = None
+        frozen_bases = frozen_tainted_stage_names(
+            ck_info=ck_info, wdir=".", frozen_changes=frozen_changes
+        )
+    finally:
+        os.chdir(prev_wdir)
+    stage_statuses = {}
+    # One run per iteration is recorded as 'name@item', so each is counted
+    # toward its stage
+    locked_bases = {n.split("@")[0] for n in lock_stages}
+    for name in ck_stages:
+        stale = [
+            s
+            for key, s in status.stale_stages.items()
+            if key.split("@")[0] == name
+        ]
+        stage_statuses[name] = get_stage_status(
+            stale, has_run=name in locked_bases
+        )
+    # Keyed as the hub keys them, i.e., by each current entry in dvc.lock,
+    # with stages never run under their own names
+    live_lock_stages = get_live_lock_stages(
+        lock_stages,
+        {n: s for n, s in dvc_stages.items() if isinstance(s, dict)},
+    )
+    lock_stage_statuses = {
+        name: get_stage_status([], has_run=False)
+        for name in dvc_stages
+        if not name.startswith("_") and name not in locked_bases
+    }
+    for name in live_lock_stages:
+        stale_stage = status.stale_stages.get(name)
+        lock_stage_statuses[name] = get_stage_status(
+            [stale_stage] if stale_stage is not None else [], has_run=True
+        )
+    return {
+        "ck_stages": ck_stages,
+        "stage_statuses": stage_statuses,
+        "lock_stage_statuses": lock_stage_statuses,
+        "frozen": sorted(
+            n for n in live_lock_stages if n.split("@")[0] in frozen_bases
+        ),
+        "frozen_changes": {
+            n: c for n, c in (frozen_changes or {}).items() if c is not None
+        },
+        "status": "stale" if status.is_stale else "up-to-date",
+        "error": "; ".join(status.errors) or None,
+        "dvc_stages": {
+            name: stage
+            for name, stage in dvc_stages.items()
+            if isinstance(stage, dict)
+        },
+    }
 
 
 def find_document_stages(

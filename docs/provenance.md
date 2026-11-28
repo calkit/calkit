@@ -25,6 +25,21 @@ passes, because there is nothing to check, and that is exactly what makes
 them easy to overlook: the project looks fully reproducible right up until
 someone asks where the raw numbers came from.
 
+<!-- TODO: needs human review -->
+
+To answer "How did you calculate it?" for a figure, table, results file, or
+one value in it, ask the project:
+
+```sh
+calkit show provenance results/fit.json --key rmse
+```
+
+It says whether the value is up to date, and if not, why, then shows the
+stage that makes it, with its source or command, environment, last run, and
+inputs, and does the same for each stage upstream, down to the data it
+started from and anything whose origin isn't defined.
+Add `--json` for all of it in a form a coding agent can read.
+
 ## Data
 
 A dataset records how it entered the project. See

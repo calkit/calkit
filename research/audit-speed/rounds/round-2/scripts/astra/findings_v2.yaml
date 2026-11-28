@@ -1,0 +1,89 @@
+# Findings as typed after materializing with the corrected sessions export.
+# source_commit is filled in from Git when they're recorded.
+sample:
+  label: "Analysis sample"
+  claim: >-
+    The analysis sample comprised N = 395 participants (mean age 72.9 years;
+    63% women).
+  scope: "Universe baseline (adjustment = ancova)."
+  evidence:
+    - id: ev_analysis_data
+      artifact: analysis_data
+      universe: baseline
+    - id: ev_model_results
+      artifact: model_results
+      universe: baseline
+baseline_balance:
+  label: "Baseline balance"
+  claim: >-
+    Mean baseline score was 52.0 in the training group and 51.4 in the control
+    group.
+  scope: "Universe baseline (adjustment = ancova)."
+  evidence:
+    - id: ev_model_results
+      artifact: model_results
+      universe: baseline
+week12_means:
+  label: "Week-12 means"
+  claim: >-
+    Mean week-12 score was 57.4 in the training group and 54.3 in the control
+    group.
+  scope: "Universe baseline (adjustment = ancova)."
+  evidence:
+    - id: ev_model_results
+      artifact: model_results
+      universe: baseline
+    - id: ev_score_by_week
+      artifact: score_by_week
+      universe: baseline
+training_effect:
+  label: "Training effect (ANCOVA)"
+  claim: >-
+    Adjusting for baseline score, age, and education, training raised week-12
+    scores by 3.93 points (95% CI 2.89 to 4.96; p < 0.001).
+  scope: "Universe baseline (adjustment = ancova)."
+  evidence:
+    - id: ev_model_results
+      artifact: model_results
+      universe: baseline
+change_score_effect:
+  label: "Training effect (change score)"
+  claim: >-
+    In the change-score sensitivity analysis, training raised scores from
+    baseline to week 12 by 3.76 points (95% CI 2.67 to 4.86; p < 0.001).
+  scope: "Universe change_score (adjustment = change)."
+  evidence:
+    - id: ev_model_results
+      artifact: model_results
+      universe: change_score
+education_gap:
+  label: "Graduate vs. secondary education"
+  claim: >-
+    Adjusting for arm, baseline score, and age, participants with graduate
+    education scored 2.84 points higher at week 12 than those with secondary
+    education (95% CI 1.50 to 4.17; p < 0.001).
+  scope: "Universe baseline (adjustment = ancova)."
+  evidence:
+    - id: ev_model_results
+      artifact: model_results
+      universe: baseline
+age_slope:
+  label: "Age"
+  claim: >-
+    Each additional 10 years of age was associated with a change of -1.53
+    points in week-12 score (95% CI -2.22 to -0.84).
+  scope: "Universe baseline (adjustment = ancova)."
+  evidence:
+    - id: ev_model_results
+      artifact: model_results
+      universe: baseline
+variance_explained:
+  label: "Variance explained"
+  claim: >-
+    The primary model explained 67.1% of the variance in week-12 scores (R² =
+    0.671).
+  scope: "Universe baseline (adjustment = ancova)."
+  evidence:
+    - id: ev_model_results
+      artifact: model_results
+      universe: baseline

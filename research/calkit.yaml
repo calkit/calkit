@@ -33,6 +33,40 @@ questions:
       - kind: table
         path: results/audit-speed.md
 
+  - question: >-
+      With subtler bugs and three agent audits per arm, does any tool help
+      agents find the problems in an analysis faster or more reliably than
+      working without one?
+    answer: >-
+      Not faster: the arm with no framework or version control was fastest
+      (mean {none_s:.0f} s), then Calkit ({calkit_s:.0f} s), ASTRA
+      ({astra_s:.0f} s), and OpenResearch ({orx_s:.0f} s), and every
+      auditor found the merge that silently dropped a site. The arms
+      differed only on the bug in the model's reference level (Calkit
+      {calkit_ref}/{calkit_ref_n}, ASTRA {astra_ref}/{astra_ref_n}, no
+      framework {none_ref}/{none_ref_n}, OpenResearch
+      {orx_ref}/{orx_ref_n}), too few runs to call. Calkit kept a stale
+      number out of the report by filling numbers in from results; in every
+      other arm, auditors found it by matching numbers to files by hand.
+    evidence:
+      - kind: result
+        path: results/audit-speed.json
+        values:
+          none_s: rounds.2.arms.none.mean_seconds
+          calkit_s: rounds.2.arms.calkit.mean_seconds
+          astra_s: rounds.2.arms.astra.mean_seconds
+          orx_s: rounds.2.arms.openresearch.mean_seconds
+          none_ref: rounds.2.arms.none.found.reference_level.found
+          none_ref_n: rounds.2.arms.none.found.reference_level.possible
+          calkit_ref: rounds.2.arms.calkit.found.reference_level.found
+          calkit_ref_n: rounds.2.arms.calkit.found.reference_level.possible
+          astra_ref: rounds.2.arms.astra.found.reference_level.found
+          astra_ref_n: rounds.2.arms.astra.found.reference_level.possible
+          orx_ref: rounds.2.arms.openresearch.found.reference_level.found
+          orx_ref_n: rounds.2.arms.openresearch.found.reference_level.possible
+      - kind: table
+        path: results/audit-speed.md
+
 environments:
   main:
     kind: uv

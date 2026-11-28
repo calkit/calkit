@@ -1,0 +1,12 @@
+<signal name="treatment_effect" label="Training effect" unit="points" digits="2" better="higher" />
+<signal name="treatment_ci_low" label="Effect CI low" unit="points" digits="2" />
+<signal name="treatment_ci_high" label="Effect CI high" unit="points" digits="2" />
+<signal name="n_analyzed" label="N analyzed" digits="0" />
+<signal name="w12_mean_training" label="Week-12 mean, training" digits="1" />
+<signal name="w12_mean_control" label="Week-12 mean, control" digits="1" />
+<signal name="graduate_vs_secondary" label="Graduate vs. secondary" unit="points" digits="2" />
+<signal name="r_squared" label="R²" digits="3" />
+<view headline="treatment_effect">
+  <stats of="treatment_effect n_analyzed w12_mean_training w12_mean_control graduate_vs_secondary r_squared" />
+  <text>Training effect **{treatment_effect}** points (95% CI {treatment_ci_low} to {treatment_ci_high}); N = {n_analyzed}.</text>
+</view>

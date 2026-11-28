@@ -1,13 +1,13 @@
 {
   "summarize-audit-speed": {
-    "start_time": "2026-11-27T19:15:55.133000",
-    "end_time": "2026-11-27T19:15:55.591000",
+    "start_time": "2026-11-28T00:34:45.421000",
+    "end_time": "2026-11-28T00:34:45.823000",
     "environment": "main",
-    "git_rev": "337ed0e7f07bb6f0c69390f13d5a5de57bdc38f5",
+    "git_rev": "b729accf808059766e817d42dd2498e40b07904b",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:92fe08688b15ab98e8b5105c776e8f440474aac15e751f16e1b49ea603010a9c",
-    "calkit_version": "0.53.2.dev11+g337ed0e7f.d20261127",
-    "calkit_git_rev": "337ed0e7f07bb6f0c69390f13d5a5de57bdc38f5",
+    "dvc_lock_hash": "sha256:86c90819e8fdcb7a02741a86574e98c1734131cbac665758498ee3ec848f552f",
+    "calkit_version": "0.53.2.dev13+g09d49f10a",
+    "calkit_git_rev": "09d49f10afe0e8a964de6b465a2a0ff0d98919bc",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",

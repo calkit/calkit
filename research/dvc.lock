@@ -10,13 +10,13 @@ stages:
       size: 5
     - path: audit-speed/rounds
       hash: md5
-      md5: 7f3c4a76df0e36b6746de646a91fc890.dir
-      size: 3223
-      nfiles: 1
+      md5: 82634c92bc2742bbbaa4d6f5b4118045.dir
+      size: 91153
+      nfiles: 33
     - path: scripts/summarize-audit-speed.py
       hash: md5
-      md5: 9dacb2b4d42b8f6e5c943d73e66e4f35
-      size: 2224
+      md5: 3bab8888f6dc3abe42e5be79f2837086
+      size: 3659
     - path: uv.lock
       hash: md5
       md5: 6c402f04979b22d8c65c29b5785cce5b
@@ -24,9 +24,9 @@ stages:
     outs:
     - path: results/audit-speed.json
       hash: md5
-      md5: 73e461f47508821d2307956e3db20835
-      size: 1031
+      md5: be91757f0b6baa72f7db4e471aff1e1f
+      size: 4920
     - path: results/audit-speed.md
       hash: md5
-      md5: 408a337a91291b69a982cbef4e8e2b8f
-      size: 389
+      md5: 7fa6e9d747ea20405c656ec3dd507045
+      size: 2043

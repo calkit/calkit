@@ -1,0 +1,7 @@
+# Baseline Universe
+
+id: baseline
+description: "Primary analysis: ANCOVA"
+
+decisions:
+  adjustment: ancova

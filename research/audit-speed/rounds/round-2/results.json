@@ -1,0 +1,170 @@
+{
+  "round": 2,
+  "date": "2026-11-27",
+  "task": "Audit a report's Methods and 8 numbered results against the code and data, reporting every problem found.",
+  "planted_bugs": {
+    "merge": "Site D's session export writes unpadded IDs (D-7 against D-007), and ID normalization only fixes case and whitespace, so the inner join silently drops all of site D (N 395 instead of 429).",
+    "reference_level": "Education's category order is lost when written to CSV, so the model's reference is college, not secondary as the Methods says; 'graduate vs. secondary' is reported as 2.84 rather than 4.53 with both bugs fixed.",
+    "stale_number": "A typed training-group week-12 mean (57.4) left over from before a data correction (58.6 now). Planted wherever an arm's numbers are typed: the hand-written report (none), ASTRA findings' claim text, OpenResearch notes and report. Calkit's answers and report are filled in from results, so it can't occur there (null in 'found')."
+  },
+  "auditor": {
+    "kind": "agent",
+    "model": "claude-opus-5-5",
+    "harness": "Claude Code subagent, general-purpose, 3 per arm run one batch at a time, not told bugs existed, confined to its arm"
+  },
+  "arms": {
+    "none": [
+      {
+        "tool_version": "Python 3.12, pandas 3.1.1, statsmodels 0.15.0; no version control",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "duration_s": 64.9,
+        "tool_calls": 7,
+        "tokens": 56125,
+        "notes": "flagged stale merged.csv beside merged_final.csv; no record of which data made which output"
+      },
+      {
+        "tool_version": "Python 3.12, pandas 3.1.1, statsmodels 0.15.0; no version control",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "duration_s": 55.3,
+        "tool_calls": 5,
+        "tokens": 55475,
+        "notes": "traced 57.4 to merged.csv by hand; nothing records which file made which number"
+      },
+      {
+        "tool_version": "Python 3.12, pandas 3.1.1, statsmodels 0.15.0; no version control",
+        "found": {
+          "merge": true,
+          "reference_level": false,
+          "stale_number": true
+        },
+        "duration_s": 65.1,
+        "tool_calls": 7,
+        "tokens": 55194,
+        "notes": "listed 'secondary as reference' as checked and correct; stale merged.csv unlabeled; scripts don't report merge row loss"
+      }
+    ],
+    "astra": [
+      {
+        "tool_version": "lightcone-cli 0.5.1, astra-tools 0.2.18",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "duration_s": 79.1,
+        "tool_calls": 9,
+        "tokens": 64917,
+        "notes": "validate and lc status green but caught none; manifests input hashes and git-annex history traced 57.4"
+      },
+      {
+        "tool_version": "lightcone-cli 0.5.1, astra-tools 0.2.18",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "duration_s": 81.5,
+        "tool_calls": 10,
+        "tokens": 66879,
+        "notes": "manifests and evidence commits helped; lc status current = false comfort; claim text never checked against cited numbers"
+      },
+      {
+        "tool_version": "lightcone-cli 0.5.1, astra-tools 0.2.18",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "duration_s": 97.1,
+        "tool_calls": 12,
+        "tokens": 71501,
+        "notes": "annex kept old result versions, traced 57.4; validate and lc status don't check claim wording against evidence values"
+      }
+    ],
+    "calkit": [
+      {
+        "tool_version": "calkit 0.53.2.dev13 (commit 09d49f10a)",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": null
+        },
+        "duration_s": 79.1,
+        "tool_calls": 10,
+        "tokens": 65929,
+        "notes": "check questions per-value diffs helped; 'current evidence' read as false comfort; stage chain omitted fit-model (iterate_over bug)"
+      },
+      {
+        "tool_version": "calkit 0.53.2.dev13 (commit 09d49f10a)",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": null
+        },
+        "duration_s": 67.9,
+        "tool_calls": 7,
+        "tokens": 64512,
+        "notes": "stage graph and git-tracked data helped; 'current evidence' false comfort; verbose evidence-changed notes useful but noisy"
+      },
+      {
+        "tool_version": "calkit 0.53.2.dev13 (commit 09d49f10a)",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": null
+        },
+        "duration_s": 88.1,
+        "tool_calls": 9,
+        "tokens": 67110,
+        "notes": "per-value diff confirmed export correction propagated; 'current evidence' reads as reassurance; stage chain mislabeled (iterate_over bug)"
+      }
+    ],
+    "openresearch": [
+      {
+        "tool_version": "orx 0.2.30",
+        "found": {
+          "merge": true,
+          "reference_level": false,
+          "stale_number": true
+        },
+        "duration_s": 99.6,
+        "tool_calls": 11,
+        "tokens": 73459,
+        "notes": "reported result 6 graduate gap as correct (2.80); exp status live signals beside typed notes exposed 57.4"
+      },
+      {
+        "tool_version": "orx 0.2.30",
+        "found": {
+          "merge": true,
+          "reference_level": false,
+          "stale_number": true
+        },
+        "duration_s": 110.4,
+        "tool_calls": 12,
+        "tokens": 80397,
+        "notes": "reported graduate vs secondary 2.80 as corrected; exp status signals side by side exposed 57.4; descriptions free text"
+      },
+      {
+        "tool_version": "orx 0.2.30",
+        "found": {
+          "merge": true,
+          "reference_level": true,
+          "stale_number": true
+        },
+        "duration_s": 98.4,
+        "tool_calls": 13,
+        "tokens": 81452,
+        "notes": "orx logs metrics and data hashes traced result 3; short experiment IDs rejected; nothing links report to runs"
+      }
+    ]
+  },
+  "conclusion": "Every auditor found the merge bug, and the stale number every time it existed. The arms differed on the reference level (Calkit 3/3, ASTRA 3/3, none 2/3, OpenResearch 1/3), which with 3 runs each is suggestive at best. No framework was fastest, and each framework added time roughly in proportion to how much tool there was to navigate. Calkit prevented the stale number by construction. Every Calkit and ASTRA auditor called their tools' green checks false comfort, since they show outputs are current, not correct."
+}

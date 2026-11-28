@@ -475,6 +475,7 @@ class Stage(Model):
         "python-script",
         "latex",
         "quarto",
+        "myst",
         "matlab-script",
         "matlab-command",
         "command",

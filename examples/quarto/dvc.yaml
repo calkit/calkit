@@ -30,7 +30,8 @@ stages:
     desc: Automatically generated from the 'energy' stage in calkit.yaml.
       Changes made here will be overwritten.
   analysis:
-    cmd: calkit quarto render -e quarto --no-check analysis.ipynb -- --execute
+    cmd: calkit doc quarto render -e quarto --no-check analysis.ipynb --
+      --execute
     deps:
       - .calkit/notebooks/cleaned/analysis.ipynb
       - pixi.lock
@@ -52,7 +53,7 @@ stages:
     desc: Automatically generated from the 'analysis' stage in calkit.yaml.
       Changes made here will be overwritten.
   report:
-    cmd: calkit quarto render -e quarto --no-check report.qmd
+    cmd: calkit doc quarto render -e quarto --no-check report.qmd
     deps:
       - report.qmd
       - data/sim.csv

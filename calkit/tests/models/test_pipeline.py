@@ -500,7 +500,7 @@ def test_quartostage(tmp_path):
     # Calkit renders it, checking Quarto comes from the environment and
     # resolving the document's values first
     assert sd["cmd"] == (
-        "calkit quarto render -e analysis --no-check report/report.qmd"
+        "calkit doc quarto render -e analysis --no-check report/report.qmd"
     )
     assert "report/report.qmd" in sd["deps"]
     assert "report/results.json" in sd["deps"]
@@ -529,7 +529,7 @@ def test_quartostage(tmp_path):
         outputs=["report/report.html"],
     )
     assert s.dvc_cmd == (
-        "calkit quarto render -e _system --no-check report/report.qmd"
+        "calkit doc quarto render -e _system --no-check report/report.qmd"
     )
     # A stage listing Quarto as a requirement says one installed on the
     # machine is expected
@@ -540,7 +540,7 @@ def test_quartostage(tmp_path):
         requirements=["quarto>=1.8"],
     )
     assert s.dvc_cmd == (
-        "calkit quarto render -e _system --no-check --allow-machine-quarto "
+        "calkit doc quarto render -e _system --no-check --allow-machine-quarto "
         "report/report.qmd"
     )
     # A notebook rendered with --execute gets its outputs written back, so

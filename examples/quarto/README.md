@@ -50,5 +50,5 @@ with links to them on GitHub.
 Each value shown with `ckvalue` is underlined;
 selecting it shows the same for the value.
 Edit `scripts/simulate.jl` and render the report with
-`calkit quarto render -e quarto report.qmd`, without running the
+`calkit doc build report.qmd`, without running the
 pipeline, to see them say they're out of date while collapsed.

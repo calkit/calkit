@@ -476,7 +476,7 @@ local function unrecorded()
     ),
     pandoc.Para({
       pandoc.Str("Render"), pandoc.Space(), pandoc.Str("with"),
-      pandoc.Space(), pandoc.Code("calkit quarto render"),
+      pandoc.Space(), pandoc.Code("calkit doc quarto render"),
       pandoc.Space(), pandoc.Str("or"), pandoc.Space(),
       pandoc.Code("calkit run"), pandoc.Str("."),
     }),
@@ -527,7 +527,7 @@ local function component_div(el, kind)
     if data then
       quarto.log.warning(
         "Calkit recorded no provenance for " .. src .. "; is it in a "
-          .. "place 'calkit quarto render' doesn't look, e.g., an include?"
+          .. "place 'calkit doc quarto render' doesn't look, e.g., an include?"
       )
     end
     out:extend(unrecorded())

@@ -1943,7 +1943,7 @@ class QuartoStage(Stage):
     DVC-cached by default; use a ``PathOutput`` to store an output with Git
     instead.
 
-    It renders with ``calkit quarto render``, which checks Quarto comes from
+    It renders with ``calkit doc quarto render``, which checks Quarto comes from
     the stage's environment, or is a declared requirement, and resolves the
     values the document shows with the ``ckvalue`` shortcode first. A notebook
     rendered with ``--execute`` is depended on with its outputs stripped,
@@ -1982,7 +1982,7 @@ class QuartoStage(Stage):
     def allows_machine_quarto(self) -> bool:
         """Whether Quarto from this machine is expected, as it is if the
         stage requires it, or the project does, which
-        ``calkit quarto render`` reads itself.
+        ``calkit doc quarto render`` reads itself.
         """
         import calkit.environments
 
@@ -2032,7 +2032,7 @@ class QuartoStage(Stage):
         much inputs as its source, and with ``write_files``, write the
         Quarto extension that shows the values.
 
-        A malformed shortcode is left for ``calkit quarto render`` to report
+        A malformed shortcode is left for ``calkit doc quarto render`` to report
         when the stage runs, rather than stopping the pipeline from
         compiling.
         """
@@ -2120,7 +2120,7 @@ class QuartoStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         # Dispatched to a job scheduler or another machine as other stages
-        # are, with 'calkit quarto render' taking the place of the inner
+        # are, with 'calkit doc quarto render' taking the place of the inner
         # xenv; with no runtime to activate there, it renders as is
         inner_xenv = f"calkit xenv -n {self.inner_environment} --no-check --"
         prefix = self.xenv_cmd
@@ -2140,7 +2140,9 @@ class QuartoStage(Stage):
         if self.args:
             args += ["--"] + self.args
         # Quoted for cmd.exe too, which DVC runs commands with on Windows
-        cmd = "calkit quarto render " + " ".join(quote_arg(a) for a in args)
+        cmd = "calkit doc quarto render " + " ".join(
+            quote_arg(a) for a in args
+        )
         return f"{prefix} {cmd}".strip()
 
     @property

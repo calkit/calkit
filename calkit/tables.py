@@ -9,6 +9,12 @@ from typing import Any, Literal
 # showing a CSV needs no dataframe engine installed; everything else is
 # read through pandas or polars.
 DELIMITERS = {".csv": ",", ".tsv": "\t"}
+# Bigger tables aren't counted after their stage runs, so counting stays quick
+MAX_COUNT_BYTES = 100_000_000
+# Nor are their groups compared, which means parsing them
+MAX_GROUP_BYTES = 2_000_000
+# The most distinct values a text column can have to be taken for groups
+MAX_GROUPS = 20
 
 
 def ext(path: str) -> str:
@@ -441,3 +447,154 @@ def write_table(
         raise ValueError(f"Can't write a table as '{suffix}'")
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text)
+
+
+def count_rows(path: str, max_bytes: int = MAX_COUNT_BYTES) -> int | None:
+    """The number of rows in a table, less its header, or ``None`` if it's
+    not counted, e.g., for not being a table or being over ``max_bytes``.
+
+    Delimited text is counted by its lines without parsing, so a quoted
+    value spanning lines counts as more than one row. Parquet is counted
+    from its metadata, if pyarrow is installed.
+    """
+    suffix = ext(path)
+    if not os.path.isfile(path):
+        return None
+    if suffix == ".parquet":
+        try:
+            import pyarrow.parquet
+
+            return int(pyarrow.parquet.ParquetFile(path).metadata.num_rows)
+        except Exception:
+            return None
+    if suffix not in DELIMITERS or os.path.getsize(path) > max_bytes:
+        return None
+    n_lines = 0
+    last = b"\n"
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            n_lines += chunk.count(b"\n")
+            last = chunk[-1:]
+    # A last line with no newline is a row too
+    if last != b"\n":
+        n_lines += 1
+    return max(n_lines - 1, 0)
+
+
+def count_groups(
+    path: str, max_bytes: int = MAX_GROUP_BYTES, max_groups: int = MAX_GROUPS
+) -> dict[str, dict[str, int]]:
+    """The rows with each value of each grouping column of a delimited text
+    table up to ``max_bytes``, i.e., a text column with up to ``max_groups``
+    distinct values, each with two rows on average, e.g., a site. Empty
+    values aren't counted.
+    """
+    import csv
+
+    def is_number(value: str) -> bool:
+        try:
+            float(value)
+        except ValueError:
+            return False
+        return True
+
+    suffix = ext(path)
+    if (
+        suffix not in DELIMITERS
+        or not os.path.isfile(path)
+        or os.path.getsize(path) > max_bytes
+    ):
+        return {}
+    with open(path, newline="", encoding="utf-8-sig", errors="replace") as f:
+        reader = csv.reader(f, delimiter=DELIMITERS[suffix])
+        header = next(reader, [])
+        counts: dict[int, dict[str, int]] = {i: {} for i in range(len(header))}
+        for row in reader:
+            for i, column in list(counts.items()):
+                value = row[i] if i < len(row) else ""
+                if not value:
+                    continue
+                if value in column:
+                    column[value] += 1
+                elif len(column) >= max_groups or is_number(value):
+                    del counts[i]
+                else:
+                    column[value] = 1
+            # Nothing left to take for groups
+            if not counts:
+                break
+    # Values that don't repeat, e.g., IDs in a small table, aren't groups
+    return {
+        header[i]: c
+        for i, c in counts.items()
+        if c and 2 * len(c) <= sum(c.values())
+    }
+
+
+def get_row_counts(input_paths: list[str], output_paths: list[str]) -> dict:
+    """How many rows a stage's input and output tables have, and, by output,
+    each value of a grouping column it shares with an input that has rows
+    in the input but none in the output, with how many it had.
+
+    Files that aren't tables, or are too big to count quickly, are left out.
+    """
+    counts: dict[str, Any] = {"inputs": {}, "outputs": {}}
+    for key, paths in (("inputs", input_paths), ("outputs", output_paths)):
+        for path in paths:
+            n_rows = count_rows(path)
+            if n_rows is not None:
+                counts[key][path] = n_rows
+    if not counts["inputs"] or not counts["outputs"]:
+        return counts
+    input_groups = [count_groups(p) for p in counts["inputs"]]
+    lost: dict[str, dict[str, dict[str, int]]] = {}
+    for out_path in counts["outputs"]:
+        out_groups = count_groups(out_path)
+        for groups in input_groups:
+            for column, values in groups.items():
+                if column not in out_groups:
+                    continue
+                for value, n_rows in values.items():
+                    if value in out_groups[column]:
+                        continue
+                    out_lost = lost.setdefault(out_path, {})
+                    column_lost = out_lost.setdefault(column, {})
+                    column_lost[value] = max(column_lost.get(value, 0), n_rows)
+    if lost:
+        counts["lost_groups"] = lost
+    return counts
+
+
+def get_row_counts_text(stage_name: str, counts: dict) -> str:
+    """A line saying how many rows went into and came out of a stage,
+    noting an output with fewer rows than the smallest input table, and
+    any group an output lost all rows of.
+    """
+
+    def get_rows_text(n_rows: int) -> str:
+        return f"{n_rows:,} row{'' if n_rows == 1 else 's'}"
+
+    inputs: dict[str, int] = counts.get("inputs") or {}
+    outputs: dict[str, int] = counts.get("outputs") or {}
+    lost: dict = counts.get("lost_groups") or {}
+    smallest = min(inputs.items(), key=lambda item: item[1], default=None)
+    out_texts = []
+    for path, n_rows in outputs.items():
+        notes = []
+        if smallest is not None and n_rows < smallest[1]:
+            n_fewer = smallest[1] - n_rows
+            pct = round(100 * n_fewer / smallest[1])
+            notes.append(f"{n_fewer:,} fewer than {smallest[0]}, {pct}%")
+        for column, values in (lost.get(path) or {}).items():
+            for value, n_before in values.items():
+                notes.append(f"{column} {value}: {n_before:,} -> 0 rows")
+        text = f"{path} {get_rows_text(n_rows)}"
+        if notes:
+            text += f" ({'; '.join(notes)})"
+        out_texts.append(text)
+    in_text = ", ".join(f"{p} {get_rows_text(n)}" for p, n in inputs.items())
+    return (
+        f"{stage_name}: "
+        + (f"{in_text} -> " if in_text else "")
+        + ", ".join(out_texts)
+    )

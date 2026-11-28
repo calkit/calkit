@@ -2895,6 +2895,32 @@ def test_run_writes_private_logs(tmp_dir):
     assert not os.path.exists(os.path.join(".calkit", "systems"))
     with open(STAGE_RUNS_FPATH) as f:
         assert json.load(f)["s1"]["start_time"] > entry["start_time"]
+    # A stage with tables says how many rows went in and came out, and
+    # records them by their paths in the project, whatever its wdir
+    os.makedirs("sub")
+    with open(os.path.join("sub", "in.csv"), "w") as f:
+        f.write("x\n1\n2\n3\n")
+    dvc_yaml["stages"]["s2"] = {
+        "cmd": "python -c \"open('out.csv', 'w').write('x\\n1\\n')\"",
+        "wdir": "sub",
+        "deps": ["in.csv"],
+        "outs": ["out.csv"],
+    }
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(dvc_yaml, f)
+    out = subprocess.check_output(["calkit", "run"], text=True)
+    assert (
+        "s2: sub/in.csv 3 rows -> sub/out.csv 1 row "
+        "(2 fewer than sub/in.csv, 67%)"
+    ) in out.splitlines()
+    assert "s1:" not in out
+    with open(STAGE_RUNS_FPATH) as f:
+        stage_runs = json.load(f)
+    assert stage_runs["s2"]["rows"] == {
+        "inputs": {"sub/in.csv": 3},
+        "outputs": {"sub/out.csv": 1},
+    }
+    assert "rows" not in stage_runs["s1"]
 
 
 def test_prune_run_logs(tmp_dir):

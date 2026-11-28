@@ -7,6 +7,7 @@ import csv
 import json
 import logging
 import os
+import posixpath
 import re
 import shlex
 import shutil
@@ -29,6 +30,7 @@ from typing_extensions import Annotated, Optional
 import calkit
 import calkit.merge
 import calkit.progress
+import calkit.tables
 from calkit import (
     DVC_EXTENSIONS,
     FIGURE_DVC_SIZE_THRESH_BYTES,
@@ -5049,6 +5051,9 @@ def run(
         machine_info: dict[str, dict | None] = {}
         # By directory, for a subproject's stages
         lock_stages: dict[str | None, dict] = {}
+        lock_dir_dvc_stages: dict[str | None, dict] = {}
+        # How many rows went into and came out of each stage, to print
+        row_counts_texts: list[str] = []
         # The commit the run started from, which the results' commit will
         # follow, and whether it was all there was
         git_dirty = bool(
@@ -5081,6 +5086,49 @@ def run(
                 entry["dvc_lock_hash"] = calkit.dvc.stage_lock_hash(
                     lock_stages[lock_dir][lock_name]
                 )
+                # Rows in its input and output tables, so lost rows show,
+                # by their paths from here, which dvc.lock gives from wdir
+                lock_entry = lock_stages[lock_dir][lock_name]
+                try:
+                    if lock_dir not in lock_dir_dvc_stages:
+                        lock_dir_dvc_stages[lock_dir] = (
+                            calkit.dvc.read_pipeline(lock_dir or ".").get(
+                                "stages"
+                            )
+                            or {}
+                        )
+                    dvc_stage = (
+                        lock_dir_dvc_stages[lock_dir].get(
+                            lock_name.split("@")[0]
+                        )
+                        or {}
+                    )
+                    stage_wdir = posixpath.join(
+                        lock_dir or "", dvc_stage.get("wdir") or ""
+                    )
+                    paths = {
+                        key: [
+                            posixpath.normpath(
+                                posixpath.join(stage_wdir, str(f["path"]))
+                            )
+                            for f in lock_entry.get(key) or []
+                            if isinstance(f, dict) and f.get("path")
+                        ]
+                        for key in ("deps", "outs")
+                    }
+                    row_counts = calkit.tables.get_row_counts(
+                        paths["deps"], paths["outs"]
+                    )
+                except Exception as e:
+                    warn(f"Couldn't count rows of {stage_name}'s tables: {e}")
+                    row_counts = {}
+                if row_counts.get("outputs"):
+                    entry["rows"] = row_counts
+                    row_counts_texts.append(
+                        calkit.tables.get_row_counts_text(
+                            stage_name, row_counts
+                        )
+                    )
             entry["calkit_version"] = system_info.get("calkit_version")
             if system_info.get("calkit_git_rev"):
                 entry["calkit_git_rev"] = system_info["calkit_git_rev"]
@@ -5154,6 +5202,9 @@ def run(
                 json.dump(dict(sorted(runs.items())), f, indent=2)
                 f.write("\n")
             written.append(fpath)
+        if not quiet:
+            for text in row_counts_texts:
+                typer.echo(text)
     # The private log under .calkit/local/logs is retained either way so the
     # last run's status stays inspectable; it is gitignored.
     os.environ.pop("CALKIT_PIPELINE_RUNNING", None)

@@ -260,3 +260,68 @@ def test_write_table(tmp_dir):
         assert r"$-$1\_234.5 \\" in f.read()
     with pytest.raises(ValueError, match="'.xlsx'"):
         calkit.tables.write_table("rates.xlsx", table)
+
+
+def test_get_row_counts(tmp_dir):
+    participants = ["id,site,arm,age"] + [
+        f"{s}-{i},{s},{'ab'[i % 2]},{60 + i}" for s in "ABD" for i in range(4)
+    ]
+    with open("participants.csv", "w") as f:
+        f.write("\n".join(participants) + "\n")
+    # Long, so with more rows than the output, and no last newline
+    with open("sessions.tsv", "w") as f:
+        f.write("id\tweek\n" + "\n".join(f"A-{i}\t0" for i in range(30)))
+    # Site D's rows lost, as by unpadded IDs failing to merge
+    with open("analysis.csv", "w") as f:
+        f.write("\n".join(participants[:9]) + "\n")
+    with open("empty.csv", "w") as f:
+        f.write("id,site\n")
+    with open("script.py", "w") as f:
+        f.write("print('hi')\n")
+    os.makedirs("data")
+    # Lines are counted, not parsed, a header less
+    assert calkit.tables.count_rows("participants.csv") == 12
+    assert calkit.tables.count_rows("sessions.tsv") == 30
+    assert calkit.tables.count_rows("empty.csv") == 0
+    for path in ("script.py", "data", "missing.csv"):
+        assert calkit.tables.count_rows(path) is None
+    assert calkit.tables.count_rows("participants.csv", max_bytes=10) is None
+    # Only repeated text values are taken for groups, not IDs or numbers
+    assert calkit.tables.count_groups("participants.csv") == {
+        "site": {"A": 4, "B": 4, "D": 4},
+        "arm": {"a": 6, "b": 6},
+    }
+    assert calkit.tables.count_groups("participants.csv", max_groups=2) == {
+        "arm": {"a": 6, "b": 6}
+    }
+    assert calkit.tables.count_groups("participants.csv", max_bytes=10) == {}
+    counts = calkit.tables.get_row_counts(
+        ["participants.csv", "sessions.tsv", "script.py"], ["analysis.csv"]
+    )
+    assert counts == {
+        "inputs": {"participants.csv": 12, "sessions.tsv": 30},
+        "outputs": {"analysis.csv": 8},
+        "lost_groups": {"analysis.csv": {"site": {"D": 4}}},
+    }
+    assert calkit.tables.get_row_counts_text("prepare-data", counts) == (
+        "prepare-data: participants.csv 12 rows, sessions.tsv 30 rows -> "
+        "analysis.csv 8 rows (4 fewer than participants.csv, 33%; "
+        "site D: 4 -> 0 rows)"
+    )
+    # More rows than the smallest input, e.g., a reshape to long, isn't noted
+    counts = calkit.tables.get_row_counts(["analysis.csv"], ["sessions.tsv"])
+    assert calkit.tables.get_row_counts_text("s", counts) == (
+        "s: analysis.csv 8 rows -> sessions.tsv 30 rows"
+    )
+    # Nor is anything without an input table to compare with
+    counts = calkit.tables.get_row_counts(["script.py"], ["empty.csv"])
+    assert counts == {"inputs": {}, "outputs": {"empty.csv": 0}}
+    assert calkit.tables.get_row_counts_text("s", counts) == (
+        "s: empty.csv 0 rows"
+    )
+    # Parquet is counted from its metadata
+    pq = pytest.importorskip("pyarrow.parquet")
+    import pyarrow
+
+    pq.write_table(pyarrow.table({"x": [1, 2, 3]}), "x.parquet")
+    assert calkit.tables.count_rows("x.parquet") == 3

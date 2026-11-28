@@ -35,6 +35,29 @@ and a checksum of the stage's `dvc.lock` entry after it ran.
 doesn't match its recorded run,
 e.g., after `dvc commit` of an edited output.
 
+<!-- TODO: needs human review -->
+
+After a stage with an output table runs,
+`calkit run` prints how many rows went into and came out of it,
+so rows lost along the way show without anyone looking, e.g.:
+
+```
+prepare-data: data/raw/participants.csv 480 rows, data/raw/sessions.csv 1,877 rows -> data/analysis.csv 395 rows (85 fewer than data/raw/participants.csv, 18%; site D: 36 -> 0 rows)
+```
+
+An output with fewer rows than the stage's smallest input table
+is noted with how many fewer.
+So is a group that has rows in an input but none in the output,
+from a text column they share with up to 20 distinct values
+that repeat, e.g., a site.
+The counts are recorded under the stage's `rows` in
+`.calkit/stage-runs.json`.
+Only CSV and TSV files the stage lists as inputs and outputs are counted,
+by their lines, a header less,
+and only those up to 100 MB, or 2 MB for comparing groups,
+so counting stays quick.
+Parquet files are counted too if pyarrow is installed with Calkit.
+
 If the `--log` option is specified,
 DVC logs will be sent into `.calkit/logs` while the run is executing,
 and after it's complete, run metadata,

@@ -221,6 +221,8 @@ module = [
     "simpy",
     "pypandoc",
     "configobj",
+    "pyarrow",
+    "pyarrow.*",
 ]
 ignore_missing_imports = true
 

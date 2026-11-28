@@ -2081,7 +2081,9 @@ def commit(
     if output:
         typer.echo(output)
     if push_commit:
-        push()
+        if verbose and not any_dvc:
+            typer.echo("Not pushing to DVC since no DVC files were committed")
+        push(no_dvc=not any_dvc)
     # Callers use this to know whether the data needs to be pushed as well
     return any_dvc
 

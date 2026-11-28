@@ -244,8 +244,8 @@ button.ck-value{all:unset;cursor:pointer;
   border-bottom:1px dotted currentColor}
 button.ck-value:focus-visible{outline:2px solid #0d6efd;outline-offset:2px}
 .ck-value:not(.ck-ok),.ck-value.ck-outdated{border-bottom-color:#b35900}
-.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em;
-  vertical-align:super}
+.ck-flagged::after{content:"⚠";color:#b35900;font-size:.7em;
+  margin-left:.1em;vertical-align:super}
 .ck-popover{max-width:min(48rem,92vw);max-height:80vh;overflow:auto;
   padding:1rem;border:1px solid var(--bs-border-color,#dee2e6);
   border-radius:.375rem;font-size:.9em;
@@ -401,8 +401,13 @@ PROVENANCE_JS = r"""// Written by Calkit; changes are overwritten when the pipel
     for (const pre of pres) {
       pre.dataset.drawn = "true";
       const id = "ck-mermaid-" + Math.random().toString(36).slice(2);
-      const { svg } = await mermaid.render(id, pre.textContent);
-      pre.innerHTML = svg;
+      // One Mermaid can't draw stays as its source, not the rest
+      try {
+        const { svg } = await mermaid.render(id, pre.textContent);
+        pre.innerHTML = svg;
+      } catch {
+        continue;
+      }
     }
   }
   document.addEventListener("toggle", (event) => {
@@ -744,17 +749,19 @@ local function with_provenance(text, key, path, kwargs)
       .. 'aria-labelledby="' .. id .. '-title">' .. to_html(content)
       .. "</div>"
   )
+  -- Flagged with CSS, so a title, which Quarto makes text, gets only the
+  -- value
   local inner = pandoc.Inlines({pandoc.Str(text)})
+  local classes = {"ck-value", "ck-" .. (provenance.state or "ok")}
+  if changed then
+    table.insert(classes, "ck-outdated")
+  end
   if warn then
-    inner:insert(pandoc.Span(
-      {pandoc.Str("⚠")},
-      pandoc.Attr("", {"ck-flag"}, {{"aria-hidden", "true"}})
-    ))
+    table.insert(classes, "ck-flagged")
   end
   return pandoc.Inlines({pandoc.Span(inner, pandoc.Attr(
     "",
-    {"ck-value", "ck-" .. (provenance.state or "ok"),
-      changed and "ck-outdated" or nil},
+    classes,
     {
       {"data-ck-popover", id},
       {"data-ck-label", label},
@@ -1144,8 +1151,11 @@ local function get_results_path(source, kind)
   if path:lower():match("%.ipynb$") then
     path = ".calkit/notebooks/outputs/" .. normpath(path) .. "/values.json"
   end
-  -- As Calkit records it, e.g., without a leading ./
-  return normpath(path)
+  -- As Calkit records it, e.g., without a leading ./, and an absolute
+  -- path still absolute
+  local absolute = path:match("^[/\\]") ~= nil
+  path = normpath(path)
+  return absolute and "/" .. path or path
 end
 
 -- A dotted key, e.g., fit.coeffs.0, with numbers indexing lists from 0
@@ -1470,12 +1480,15 @@ def extract_values(
                         source=got["source"],
                         key=got["key"],
                         format=got.get("format"),
-                        path=_resolve_source(
-                            got["source"],
-                            results,
-                            path,
-                            i + 1,
-                            kind=got["kind"],
+                        # Normalized as the extension finds it
+                        path=posixpath.normpath(
+                            _resolve_source(
+                                got["source"],
+                                results,
+                                path,
+                                i + 1,
+                                kind=got["kind"],
+                            ).replace("\\", "/")
                         ),
                         line=i + 1,
                         provenance=provenance,
@@ -1785,7 +1798,7 @@ def get_component(
     return Component(
         kind=kind,
         src=src,
-        path=posixpath.normpath(src.lstrip("/")),
+        path=posixpath.normpath(src.replace("\\", "/").lstrip("/")),
         label=options.get("label") or options.get("name") or "",
         line=line,
         rows=rows,
@@ -2872,7 +2885,12 @@ def write_provenance(
         for name, info in _stage_run_info_from_log_content(
             log_content
         ).items():
-            if name not in lock_stages or not info.get("start_time"):
+            # Only those that ran, not ones skipped or gated off here
+            if (
+                name not in lock_stages
+                or not info.get("start_time")
+                or info.get("status") != "completed"
+            ):
                 continue
             stage_runs[name] = {
                 "start_time": info["start_time"],

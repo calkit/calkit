@@ -662,7 +662,9 @@ def read_stage_runs(wdir: str | None = None) -> dict:
     directory whether its stages ran from it or from its parent.
     """
     try:
-        with open(os.path.join(wdir or "", STAGE_RUNS_FPATH)) as f:
+        with open(
+            os.path.join(wdir or "", STAGE_RUNS_FPATH), encoding="utf-8"
+        ) as f:
             stage_runs = json.load(f)
     except OSError:
         return {}

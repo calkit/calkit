@@ -1286,8 +1286,9 @@ def test_provenance_filter(tmp_path: Path) -> None:
         ("ck-stale", "⚠️ Out of date: scripts/clean.py modified"),
         ("ck-stale", "⚠️ Out of date: scripts/clean.py modified"),
     ]
-    assert [c for c, _, _ in get_values(html)][1] == "ck-stale"
-    assert '0.123<span class="ck-flag" aria-hidden="true">⚠</span>' in html
+    # Flagged with CSS, so it's only the value as text
+    assert get_values(html)[1][0] == "ck-stale ck-flagged"
+    assert get_values(html)[1][2] == "0.123"
     res = render("report.qmd", "--to", "gfm", "--", "-o", "report.md")
     md = (
         (tmp_path / "report.md")

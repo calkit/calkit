@@ -10,15 +10,15 @@ Instead, this one is <!-- ckvalue images/latex/sizes.json calkit.unpacked_mb .0f
 unpacked and <!-- ckvalue images/latex/sizes.json calkit.download_mb .0f -->430<!-- /ckvalue --> MB
 to download, which speeds up downloads.
 These are measured for amd64, as described [below](#measuring-its-size).
-When run through `calkit latex build`,
+When run through `calkit doc build`,
 missing packages are installed into the project's `.calkit/local/texmf`
 directory the first time they're needed.
 It also includes `latexmk`, `latexdiff`, and other useful utilities,
 plus TeX4ht's `make4ht` with Ghostscript and zip, which
-`calkit latex to-docx --engine libreoffice` uses to convert a document
+`calkit doc to-docx --engine libreoffice` uses to convert a document
 without Word.
 
-This image is used by default for `calkit latex` commands,
+This image is used by default for Calkit's LaTeX commands,
 new LaTeX environments,
 and Calkit's dev container and VS Code settings.
 
@@ -109,9 +109,9 @@ since it changes rarely.
 
 The sizes above are measured by this block,
 which runs in the pipeline at the root of this repo,
-against the image `calkit latex` uses by default:
+against the image Calkit's LaTeX commands use by default:
 
-<!-- calkit stage name=sizes environment=dev
+<!-- calkit stage name=sizes environment=pipeline
      inputs=[calkit/latex.py]
      outputs=[{path: images/latex/sizes.json, storage: git}] -->
 

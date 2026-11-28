@@ -1,0 +1,9 @@
+[project]
+name = "calkit-pipeline"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["calkit-python"]
+
+# From this repo, for the stages that use its Python API
+[tool.uv.sources]
+calkit-python = { path = "..", editable = true }

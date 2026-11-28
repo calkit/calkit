@@ -2434,6 +2434,71 @@ def runs_elsewhere(env: dict) -> bool:
     return False
 
 
+# The app each kind of environment is built and run with, which a stage
+# using one needs whether or not the project says so. Docker and MATLAB
+# aren't here, since Docker offers itself when it's needed.
+KIND_APPS = {
+    "conda": "conda",
+    "julia": "julia",
+    "nix": "nix",
+    "pixi": "pixi",
+    "renv": "Rscript",
+    "uv": "uv",
+    "uv-venv": "uv",
+}
+
+
+def get_implied_requirements(
+    stage: dict, used: list[tuple[str, dict]], project_requirements: list
+) -> dict[str, str]:
+    """Get the apps a stage needs here to build its environments, e.g.,
+    Conda, by the name of the environment needing each.
+
+    ``used`` is the stage's environments, with what a switch picks here. A
+    Python script's own environment, named by the script's path, needs uv.
+    A stage sent to another machine needs none here. An app declared where
+    the stage runs, i.e., by the project, or by the stage or its
+    environments unless one is another machine, is left out, so it's
+    checked and offered as declared, e.g., with a ``version_spec``. So is
+    one a declared app provides, e.g., ``Rscript`` with ``R``.
+    """
+    from calkit.core import _normalize_requirement
+    from calkit.environments.inline import get_stage_script_path
+    from calkit.install import NAME_ALIASES, PROVIDES
+
+    elsewhere = any(runs_elsewhere(env) for _, env in used)
+    if elsewhere and stage.get("kind") in STAGE_KINDS_SENT_TO_OUTER_ENV:
+        return {}
+    declared = list(project_requirements)
+    if not elsewhere:
+        declared += stage.get("requirements") or []
+        for _, env in used:
+            declared += env.get("requirements") or []
+    declared_names: set[str] = set()
+    for raw in declared:
+        try:
+            req = _normalize_requirement(raw)
+        except ValueError:
+            # Reported where it's checked
+            continue
+        if req["kind"] != "app":
+            continue
+        name = NAME_ALIASES.get(req["name"], req["name"])
+        declared_names.add(name)
+        declared_names.update(PROVIDES.get(name, []))
+    # Those composed in with 'with' are TeX Live, which Calkit installs
+    built = list(used)
+    script_path = get_stage_script_path(stage)
+    if script_path is not None:
+        built.append((script_path, {"kind": "uv"}))
+    return {
+        env_name: app
+        for env_name, env in built
+        if (app := KIND_APPS.get(str(env.get("kind"))))
+        and app not in declared_names
+    }
+
+
 def get_pipeline_env_names(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -2629,6 +2694,7 @@ def check_all_in_pipeline(
     from contextlib import contextmanager
     from typing import IO
 
+    import calkit.environments.inline
     import calkit.progress
     from calkit.cli.check import check_environment
 
@@ -2719,6 +2785,28 @@ def check_all_in_pipeline(
                     res[env_name]["output"] = "\n".join(
                         lines[-FAILED_CHECK_OUTPUT_LINES:]
                     )
+    # Scripts that declare their own environments, keyed by path
+    for stage in stages.values():
+        script_path = calkit.environments.inline.get_stage_script_path(stage)
+        if script_path is None or script_path in res:
+            continue
+        if not os.path.isfile(script_path):
+            continue
+        current = calkit.environments.inline.lock_is_current(script_path)
+        if current and not force:
+            res[script_path] = {"success": True, "cached": True}
+            continue
+        if progress is not None:
+            progress(f"Locking environment of {script_path}")
+        try:
+            calkit.environments.inline.lock(script_path, force=True)
+            res[script_path] = {"success": True}
+        except (ValueError, RuntimeError) as e:
+            res[script_path] = {
+                "success": False,
+                "error": str(e),
+                "output": str(e),
+            }
     return res
 
 

@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "numpy>=2.5.5",
+#     "simpy>=4.1.2",
+# ]
+# ///
 """Simulate a paper worked in small steps versus stage by stage.
 
 Runs the model in docs/roi/research_flow.py, which the docs' ROI calculator

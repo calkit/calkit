@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -131,3 +132,82 @@ def test_render(tmp_path, monkeypatch):
         "render",
         "index.qmd",
     ]
+
+
+def test_render_from_stage(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from typer.testing import CliRunner
+
+    from calkit.cli.main.core import app
+
+    monkeypatch.chdir(tmp_path)
+    calkit.save_calkit_info(
+        {
+            "name": "test",
+            "pipeline": {
+                "stages": {
+                    "pub": {
+                        "kind": "quarto",
+                        "environment": "_system",
+                        "wdir": "pub",
+                        "target_path": "index.qmd",
+                        "to": "html",
+                        "args": ["--execute"],
+                        # So Quarto needn't be installed here
+                        "requirements": ["quarto"],
+                    },
+                }
+            },
+        }
+    )
+    os.makedirs("pub")
+    Path("pub/index.qmd").write_text("Hi\n")
+    Path("other.qmd").write_text("Hi\n")
+    calls: list[tuple[list[str], str]] = []
+    monkeypatch.setattr(
+        subprocess,
+        "check_call",
+        lambda cmd, **kwargs: calls.append((cmd[1:], os.getcwd())),
+    )
+    # Without -e or --to, renders as its stage from its working directory,
+    # under either 'doc quarto' or the hidden top-level 'quarto' alias
+    for cwd, cmd_args in [
+        (".", ["doc", "quarto", "render", "pub/index.qmd"]),
+        ("pub", ["quarto", "render", "index.qmd", "--", "--no-cache"]),
+    ]:
+        monkeypatch.chdir(tmp_path / cwd)
+        calls.clear()
+        result = CliRunner().invoke(app, cmd_args)
+        assert result.exit_code == 0, result.output
+        cmd, ran_in = calls[0]
+        assert cmd == ["render", "index.qmd", "--to", "html", "--execute"] + (
+            ["--no-cache"] if "--no-cache" in cmd_args else []
+        )
+        assert os.path.samefile(ran_in, tmp_path / "pub")
+        assert os.path.samefile(os.getcwd(), tmp_path / cwd)
+    # Explicit -e overrides the stage, and documents without a stage still
+    # require -e
+    monkeypatch.chdir(tmp_path)
+    calls.clear()
+    result = CliRunner().invoke(
+        app,
+        [
+            "doc",
+            "quarto",
+            "render",
+            "pub/index.qmd",
+            "-e",
+            "_system",
+            "--allow-machine-quarto",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls[0][0] == ["render", "pub/index.qmd"]
+    for args, expected in [
+        (["other.qmd"], "Name the environment"),
+        ([str(tmp_path.parent / "x.qmd")], "isn't in a Calkit project"),
+    ]:
+        result = CliRunner().invoke(app, ["doc", "quarto", "render", *args])
+        assert result.exit_code != 0, args
+        assert expected in result.output, (args, result.output)

@@ -652,6 +652,55 @@ since it describes a different machine, not a problem with this one.
 Since the stages' results may then depend on which machine ran them,
 pin the machine with a [`system` environment](#system) when that matters.
 
+<!-- TODO: needs human review -->
+
+#### Scripts that declare their own
+
+A Python script can say what it needs in a comment block at its top,
+known as
+[inline script metadata](https://docs.astral.sh/uv/guides/scripts/#declaring-script-dependencies):
+
+```python
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "matplotlib>=3.10",
+# ]
+# ///
+import matplotlib.pyplot as plt
+```
+
+A `python-script` stage with no `environment` runs its script in that
+environment with uv, so the script needs no entry under `environments`:
+
+```yaml
+pipeline:
+  stages:
+    plot:
+      kind: python-script
+      script_path: scripts/plot.py
+      outputs:
+        - figures/plot.png
+```
+
+Calkit locks the script's environment in a file beside it,
+e.g., `scripts/plot.py.lock`, which should be committed,
+and keeps it up to date when the block changes.
+Only the stages whose scripts' blocks changed then rerun,
+unlike stages sharing one environment,
+which all rerun when anything in it changes.
+This needs [uv](https://docs.astral.sh/uv/) installed.
+
+The block has to say which Python it needs with `requires-python`,
+since otherwise the lock would only suit the version it was made with.
+Within that, the version comes from the nearest `.python-version` file,
+in the script's folder or those above it, up to the project's.
+A stage whose script has no block, or no `requires-python`,
+doesn't run, rather than running in whatever Python this machine has.
+Neither can a stage whose script another stage writes,
+since there's no lock for it until that stage has run,
+so give that one an `environment`.
+
 ### venv
 
 A `venv` environment,
@@ -1277,11 +1326,11 @@ environments:
 ```
 
 Every TeX Live environment has pdfLaTeX, LuaLaTeX, latexmk, BibTeX,
-makeindex, and latexdiff, for `calkit latex diff`,
+makeindex, and latexdiff, for `calkit doc diff`,
 and one whose document uses biblatex gets Biber with it.
 List any other [TeX Live packages](https://ctan.org/) the document uses
 under `packages`, or leave them out:
-when `calkit latex build -e tex` or a LaTeX stage finds the document
+when `calkit doc build` with `-e tex` or a LaTeX stage finds the document
 needs a package the environment doesn't have,
 Calkit adds it to the environment's lock for you,
 so `packages` stays as you wrote it.
@@ -1314,7 +1363,7 @@ To download TeX Live's base packages ahead of time, e.g., when setting up a
 computer or a container image, run:
 
 ```sh
-calkit latex warm-cache
+calkit doc latex warm-cache
 ```
 
 Calkit's dev container image comes with them, so a new container's first
@@ -1323,7 +1372,7 @@ build is quicker.
 The environment only sees fonts from TeX Live packages, not those
 installed on your computer, so a document builds the same everywhere.
 
-A LaTeX stage or `calkit latex build` set up for XeLaTeX, e.g., with
+A LaTeX stage or `calkit doc build` set up for XeLaTeX, e.g., with
 `-xelatex` in `latexmk_args` or `$pdf_mode = 5` in its latexmkrc, adds
 `xetex` to the lock.
 One that makes its PDF through DVI with dvipdfmx or dvips gets that too,

@@ -449,6 +449,9 @@ INSTALLERS["npx"] = _NODE_INSTALLER
 # Names an app goes by that aren't a binary it provides, which is what an
 # install is checked for afterward
 NAME_ALIASES = {"nodejs": "node", "vscode": "code"}
+# Apps whose presence means another is present too, e.g., R ships Rscript,
+# so declaring the first covers an implied requirement on the second
+PROVIDES = {"R": ["Rscript"], "juliaup": ["julia"]}
 
 
 # Apps that are known to be unsupported on a given platform, mapped to the

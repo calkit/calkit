@@ -1,3 +1,5 @@
+<!-- TODO: needs human review -->
+
 # Shared coding spec for the error dataset parts
 
 Write your part as a CSV with Python's csv module (QUOTE_MINIMAL, UTF-8), with

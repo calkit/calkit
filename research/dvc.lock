@@ -719,3 +719,32 @@ stages:
       md5: 228cbd239caeabcb127f52f266ee6c5b.dir
       size: 19
       nfiles: 1
+  rank-workflow-levers:
+    cmd: uv run --locked --script scripts/rank-workflow-levers.py ../docs/roi 
+      results/workflow-levers.json
+    deps:
+    - path: ../docs/roi/research_flow.py
+      hash: md5
+      md5: 2606a35ff9b89cfcb3d5d19721745dfc
+      size: 36026
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/rank-workflow-levers.py
+      hash: md5
+      md5: 20dcd319498f58c4c8209dccf3b1b433
+      size: 6976
+    - path: scripts/rank-workflow-levers.py.lock
+      hash: md5
+      md5: 8e39261bdd377cdd7c1f62ce8455e31e
+      size: 21682
+    outs:
+    - path: results/workflow-levers.json
+      hash: md5
+      md5: 58e2425670fad10f0d74e1288c4afb78
+      size: 19564
+    - path: results/workflow-levers.md
+      hash: md5
+      md5: efee597a451d2d59ab2a4a05b71c8458
+      size: 1031

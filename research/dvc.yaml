@@ -303,3 +303,20 @@ stages:
           persist: false
     desc: Automatically generated from the 'summarize-agent-reliability' stage
       in calkit.yaml. Changes made here will be overwritten.
+  rank-workflow-levers:
+    cmd: uv run --locked --script scripts/rank-workflow-levers.py ../docs/roi
+      results/workflow-levers.json
+    deps:
+      - scripts/rank-workflow-levers.py
+      - scripts/rank-workflow-levers.py.lock
+      - .python-version
+      - ../docs/roi/research_flow.py
+    outs:
+      - results/workflow-levers.json:
+          cache: false
+          persist: false
+      - results/workflow-levers.md:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'rank-workflow-levers' stage in
+      calkit.yaml. Changes made here will be overwritten.

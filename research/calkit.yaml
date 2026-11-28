@@ -477,6 +477,62 @@ questions:
       - kind: table
         path: results/agent-reliability.md
 
+  # TODO: needs human review
+  - question: >-
+      Which research workflow problems, if solved, would speed research the
+      most?
+    hypothesis: >-
+      PI feedback: the PI's time to review each finding, and the work of
+      translating a review done in Word or Overleaf back into the project.
+    approach: >-
+      In the ROI model (docs/roi/research_flow.py), solve one problem at a
+      time and measure the days saved per paper, correct findings per year,
+      flaws per finding, and PI hours, each alone and each dropped from
+      everything solved at once, with 300 simulated papers per scenario.
+      Working style and tooling start from today's status quo; the rest
+      start from a pipeline with the PI still reviewing in Word. This ranks
+      problems by the model's own assumptions, e.g., one PI hour a week, so
+      it shows where to look rather than what's true.
+    answer:
+      if word > recheck and questions_drop > focused_drop and between < 15: >-
+        PI review and written questions. Alone, merging the PI's Word review
+        back saves {word:.0f} days per paper, reviewing in the browser
+        {browser:.0f}, starting findings from written questions {questions:.0f},
+        agent-assisted PI review {agent:.0f}, and reviewing one answer at a
+        time with its evidence {focused:.0f}, against {recheck:.0f} for
+        rechecking answers against evidence and {between:.0f} for reviews
+        between meetings. Dropped from everything else, written questions
+        cost {questions_drop:.0f} days and are the only lever whose absence
+        brings flaws back ({questions_flaw:.3f} per finding, against
+        {everything_flaw:.3f} with everything), and the PI
+        translating by hand costs {browser_drop:.0f}; the review levers
+        mostly substitute for each other ({focused_drop:.0f} and
+        {agent_drop:.0f}). A pipeline alone, working stage by stage, saves
+        {pipeline:.0f} days, against {steps:.0f} for working in small steps.
+      else: >-
+        Not settled; see results/workflow-levers.md.
+    evidence:
+      - kind: result
+        path: results/workflow-levers.json
+        values:
+          word: by_lever.word-round-trip.alone_gain.days_saved
+          browser: by_lever.browser-review.alone_gain.days_saved
+          questions: by_lever.questions-first.alone_gain.days_saved
+          agent: by_lever.agent-pi-review.alone_gain.days_saved
+          focused: by_lever.focused-review.alone_gain.days_saved
+          recheck: by_lever.recheck-evidence.alone_gain.days_saved
+          between: by_lever.reviews-between-meetings.alone_gain.days_saved
+          questions_drop: by_lever.questions-first.dropped_loss.days_saved
+          questions_flaw: by_lever.questions-first.dropped.flawed_per_finding_mean
+          everything_flaw: baselines.everything.flawed_per_finding_mean
+          browser_drop: by_lever.browser-review.dropped_loss.days_saved
+          focused_drop: by_lever.focused-review.dropped_loss.days_saved
+          agent_drop: by_lever.agent-pi-review.dropped_loss.days_saved
+          pipeline: by_lever.pipeline.alone_gain.days_saved
+          steps: by_lever.small-steps.alone_gain.days_saved
+      - kind: table
+        path: results/workflow-levers.md
+
 environments:
   main:
     kind: uv
@@ -823,6 +879,23 @@ pipeline:
           storage: git
         - path: results/agent-reliability.md
           storage: git
+    rank-workflow-levers:
+      kind: python-script
+      script_path: scripts/rank-workflow-levers.py
+      description: >-
+        Rank research workflow problems by how much solving each speeds a
+        paper and cuts its flaws in the ROI model, alone and dropped from
+        everything at once.
+      args:
+        - ../docs/roi
+        - results/workflow-levers.json
+      inputs:
+        - ../docs/roi/research_flow.py
+      outputs:
+        - path: results/workflow-levers.json
+          storage: git
+        - path: results/workflow-levers.md
+          storage: git
 
 datasets:
   - path: real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
@@ -871,3 +944,10 @@ tables:
       engineering errata, and agent-made research), by error type and
       impact, with the share a data profile could catch.
     stage: summarize-real-world-errors
+  - path: results/workflow-levers.md
+    title: Research workflow problems ranked in the ROI model
+    description: >-
+      Days saved per paper, correct findings per year, flaws per finding,
+      and PI hours saved when each workflow problem is solved alone, and
+      what's lost when it's dropped from everything at once.
+    stage: rank-workflow-levers

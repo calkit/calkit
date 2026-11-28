@@ -189,6 +189,24 @@
       "memory_gb": 64.0
     }
   },
+  "rank-workflow-levers": {
+    "start_time": "2026-11-28T15:28:55.063000",
+    "end_time": "2026-11-28T15:29:42.501000",
+    "git_rev": "60e207c6987990961e748d1eed64666cafdd5786",
+    "git_dirty": true,
+    "dvc_lock_hash": "sha256:e028a5488c413d1fa22c5a2c11120602614ce2e2962d533ecccfd71af4f9f18f",
+    "calkit_version": "0.53.2.dev29+g60e207c69",
+    "calkit_git_rev": "60e207c6987990961e748d1eed64666cafdd5786",
+    "system": {
+      "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
+      "os": "Darwin",
+      "os_version": "27.2.0",
+      "machine": "arm64",
+      "processor": "arm",
+      "cpu_count": 10,
+      "memory_gb": 64.0
+    }
+  },
   "summarize-agent-reliability": {
     "start_time": "2026-11-28T15:13:59.485000",
     "end_time": "2026-11-28T15:14:01.313000",

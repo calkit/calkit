@@ -1,0 +1,552 @@
+{
+  "reps": 300,
+  "baselines": {
+    "status quo": {
+      "days_mean": 580.3666666666667,
+      "days_to_finding_mean": 349.1333333333333,
+      "correct_per_year_mean": 3.5036954257933575,
+      "flawed_per_finding_mean": 0.04301458726458727,
+      "pi_hours_mean": 46.96479166666666
+    },
+    "tooled": {
+      "days_mean": 414.35,
+      "days_to_finding_mean": 170.0119956368211,
+      "correct_per_year_mean": 4.75094574497883,
+      "flawed_per_finding_mean": 0.056381229881229886,
+      "pi_hours_mean": 40.373958333333334
+    },
+    "everything": {
+      "days_mean": 273.095,
+      "days_to_finding_mean": 106.79751230511395,
+      "correct_per_year_mean": 7.396759200350536,
+      "flawed_per_finding_mean": 0.0004166666666666667,
+      "pi_hours_mean": 13.596666666666666
+    }
+  },
+  "levers": [
+    {
+      "lever": "small steps",
+      "baseline": "status quo",
+      "alone": {
+        "days_mean": 452.54,
+        "days_to_finding_mean": 187.53664149661626,
+        "correct_per_year_mean": 4.335064910251892,
+        "flawed_per_finding_mean": 0.04991706441706442,
+        "pi_hours_mean": 36.797916666666666
+      },
+      "alone_gain": {
+        "days_saved": 127.82666666666665,
+        "correct_per_year_ratio": 1.2372836058574594,
+        "flawed_per_finding_change": 0.006902477152477153,
+        "pi_hours_saved": 10.166874999999997
+      }
+    },
+    {
+      "lever": "pipeline keeps project current",
+      "baseline": "status quo",
+      "alone": {
+        "days_mean": 578.4816666666667,
+        "days_to_finding_mean": 358.8444444444445,
+        "correct_per_year_mean": 3.5450897181366723,
+        "flawed_per_finding_mean": 0.04123873348873349,
+        "pi_hours_mean": 52.05479166666667
+      },
+      "alone_gain": {
+        "days_saved": 1.884999999999991,
+        "correct_per_year_ratio": 1.0118144665311317,
+        "flawed_per_finding_change": -0.001775853775853778,
+        "pi_hours_saved": -5.090000000000003
+      }
+    },
+    {
+      "lever": "PI reviews Word, changes merged back",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 359.57166666666666,
+        "days_to_finding_mean": 135.75185961377176,
+        "correct_per_year_mean": 5.397403467021244,
+        "flawed_per_finding_mean": 0.05509884559884559,
+        "pi_hours_mean": 32.858958333333334
+      },
+      "alone_gain": {
+        "days_saved": 54.778333333333364,
+        "correct_per_year_ratio": 1.1360692705711573,
+        "flawed_per_finding_change": -0.001282384282384294,
+        "pi_hours_saved": 7.515000000000001
+      }
+    },
+    {
+      "lever": "PI reviews in browser",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 360.8983333333333,
+        "days_to_finding_mean": 132.951592873107,
+        "correct_per_year_mean": 5.47259911024384,
+        "flawed_per_finding_mean": 0.0457946497946498,
+        "pi_hours_mean": 33.01479166666667
+      },
+      "alone_gain": {
+        "days_saved": 53.45166666666671,
+        "correct_per_year_ratio": 1.1518967809783365,
+        "flawed_per_finding_change": -0.010586580086580089,
+        "pi_hours_saved": 7.359166666666667
+      },
+      "dropped": {
+        "days_mean": 302.2866666666667,
+        "days_to_finding_mean": 124.0056309584098,
+        "correct_per_year_mean": 6.737418935542224,
+        "flawed_per_finding_mean": 0.00037037037037037035,
+        "pi_hours_mean": 16.152395833333333
+      },
+      "dropped_loss": {
+        "days_saved": 29.191666666666663,
+        "correct_per_year_ratio": 1.0978624412577438,
+        "flawed_per_finding_change": 4.629629629629634e-05,
+        "pi_hours_saved": 2.5557291666666675
+      }
+    },
+    {
+      "lever": "reviews between meetings",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 419.5183333333333,
+        "days_to_finding_mean": 174.0943641029702,
+        "correct_per_year_mean": 4.659651620454366,
+        "flawed_per_finding_mean": 0.06937229437229436,
+        "pi_hours_mean": 42.675624999999975
+      },
+      "alone_gain": {
+        "days_saved": -5.168333333333294,
+        "correct_per_year_ratio": 0.9807840102950132,
+        "flawed_per_finding_change": 0.012991064491064477,
+        "pi_hours_saved": -2.301666666666641
+      },
+      "dropped": {
+        "days_mean": 276.24666666666667,
+        "days_to_finding_mean": 106.96016232981597,
+        "correct_per_year_mean": 7.359856778504647,
+        "flawed_per_finding_mean": 0.0015833333333333333,
+        "pi_hours_mean": 12.350625
+      },
+      "dropped_loss": {
+        "days_saved": 3.1516666666666424,
+        "correct_per_year_ratio": 1.0050140135815777,
+        "flawed_per_finding_change": -0.0011666666666666665,
+        "pi_hours_saved": -1.246041666666665
+      }
+    },
+    {
+      "lever": "one answer at a time with evidence",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 370.20166666666665,
+        "days_to_finding_mean": 150.56848853629782,
+        "correct_per_year_mean": 5.437874338968287,
+        "flawed_per_finding_mean": 0.0445531043031043,
+        "pi_hours_mean": 29.05583333333333
+      },
+      "alone_gain": {
+        "days_saved": 44.14833333333337,
+        "correct_per_year_ratio": 1.1445877580722652,
+        "flawed_per_finding_change": -0.011828125578125584,
+        "pi_hours_saved": 11.318125000000006
+      },
+      "dropped": {
+        "days_mean": 274.225,
+        "days_to_finding_mean": 107.78298644508385,
+        "correct_per_year_mean": 7.34827477702081,
+        "flawed_per_finding_mean": 0.0,
+        "pi_hours_mean": 13.9240625
+      },
+      "dropped_loss": {
+        "days_saved": 1.1299999999999955,
+        "correct_per_year_ratio": 1.006598068907459,
+        "flawed_per_finding_change": 0.0004166666666666667,
+        "pi_hours_saved": 0.327395833333334
+      }
+    },
+    {
+      "lever": "answers rechecked against evidence",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 399.55,
+        "days_to_finding_mean": 158.83170197557067,
+        "correct_per_year_mean": 4.983529700154124,
+        "flawed_per_finding_mean": 0.04033261183261183,
+        "pi_hours_mean": 38.16375
+      },
+      "alone_gain": {
+        "days_saved": 14.800000000000011,
+        "correct_per_year_ratio": 1.0489552959894577,
+        "flawed_per_finding_change": -0.016048618048618055,
+        "pi_hours_saved": 2.210208333333334
+      },
+      "dropped": {
+        "days_mean": 278.47,
+        "days_to_finding_mean": 108.96372029366765,
+        "correct_per_year_mean": 7.389990774097842,
+        "flawed_per_finding_mean": 0.0004166666666666667,
+        "pi_hours_mean": 14.459270833333333
+      },
+      "dropped_loss": {
+        "days_saved": 5.375,
+        "correct_per_year_ratio": 1.0009158910287705,
+        "flawed_per_finding_change": 0.0,
+        "pi_hours_saved": 0.8626041666666673
+      }
+    },
+    {
+      "lever": "findings start from written questions",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 361.85833333333335,
+        "days_to_finding_mean": 145.60603542807357,
+        "correct_per_year_mean": 5.558725388239946,
+        "flawed_per_finding_mean": 0.024885762385762386,
+        "pi_hours_mean": 34.422291666666666
+      },
+      "alone_gain": {
+        "days_saved": 52.491666666666674,
+        "correct_per_year_ratio": 1.1700250195689648,
+        "flawed_per_finding_change": -0.0314954674954675,
+        "pi_hours_saved": 5.951666666666668
+      },
+      "dropped": {
+        "days_mean": 304.2,
+        "days_to_finding_mean": 117.15747355604537,
+        "correct_per_year_mean": 6.574101332615223,
+        "flawed_per_finding_mean": 0.04028379028379028,
+        "pi_hours_mean": 15.672291666666666
+      },
+      "dropped_loss": {
+        "days_saved": 31.10499999999996,
+        "correct_per_year_ratio": 1.1251361708791996,
+        "flawed_per_finding_change": -0.03986712361712361,
+        "pi_hours_saved": 2.0756250000000005
+      }
+    },
+    {
+      "lever": "agent-assisted PI review",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 366.7916666666667,
+        "days_to_finding_mean": 160.73396540041625,
+        "correct_per_year_mean": 5.409016662224017,
+        "flawed_per_finding_mean": 0.048462361712361714,
+        "pi_hours_mean": 20.73125
+      },
+      "alone_gain": {
+        "days_saved": 47.55833333333334,
+        "correct_per_year_ratio": 1.1385136670821145,
+        "flawed_per_finding_change": -0.007918868168868172,
+        "pi_hours_saved": 19.642708333333335
+      },
+      "dropped": {
+        "days_mean": 284.5933333333333,
+        "days_to_finding_mean": 107.63471225635556,
+        "correct_per_year_mean": 7.098937386987642,
+        "flawed_per_finding_mean": 0.0,
+        "pi_hours_mean": 20.58529166666666
+      },
+      "dropped_loss": {
+        "days_saved": 11.498333333333278,
+        "correct_per_year_ratio": 1.0419530131240207,
+        "flawed_per_finding_change": 0.0004166666666666667,
+        "pi_hours_saved": 6.988624999999994
+      }
+    },
+    {
+      "lever": "project shared with submission",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 417.38666666666666,
+        "days_to_finding_mean": 170.75380550927096,
+        "correct_per_year_mean": 4.861025473027285,
+        "flawed_per_finding_mean": 0.04649446849446849,
+        "pi_hours_mean": 41.62291666666667
+      },
+      "alone_gain": {
+        "days_saved": -3.0366666666666333,
+        "correct_per_year_ratio": 1.0231700663314867,
+        "flawed_per_finding_change": -0.009886761386761395,
+        "pi_hours_saved": -1.2489583333333343
+      },
+      "dropped": {
+        "days_mean": 269.9066666666667,
+        "days_to_finding_mean": 103.55666360247322,
+        "correct_per_year_mean": 7.463651580253275,
+        "flawed_per_finding_mean": 0.00037037037037037035,
+        "pi_hours_mean": 13.378125
+      },
+      "dropped_loss": {
+        "days_saved": -3.1883333333333326,
+        "correct_per_year_ratio": 0.9910375800392776,
+        "flawed_per_finding_change": 4.629629629629634e-05,
+        "pi_hours_saved": -0.21854166666666508
+      }
+    }
+  ],
+  "by_lever": {
+    "small-steps": {
+      "lever": "small steps",
+      "baseline": "status quo",
+      "alone": {
+        "days_mean": 452.54,
+        "days_to_finding_mean": 187.53664149661626,
+        "correct_per_year_mean": 4.335064910251892,
+        "flawed_per_finding_mean": 0.04991706441706442,
+        "pi_hours_mean": 36.797916666666666
+      },
+      "alone_gain": {
+        "days_saved": 127.82666666666665,
+        "correct_per_year_ratio": 1.2372836058574594,
+        "flawed_per_finding_change": 0.006902477152477153,
+        "pi_hours_saved": 10.166874999999997
+      }
+    },
+    "pipeline": {
+      "lever": "pipeline keeps project current",
+      "baseline": "status quo",
+      "alone": {
+        "days_mean": 578.4816666666667,
+        "days_to_finding_mean": 358.8444444444445,
+        "correct_per_year_mean": 3.5450897181366723,
+        "flawed_per_finding_mean": 0.04123873348873349,
+        "pi_hours_mean": 52.05479166666667
+      },
+      "alone_gain": {
+        "days_saved": 1.884999999999991,
+        "correct_per_year_ratio": 1.0118144665311317,
+        "flawed_per_finding_change": -0.001775853775853778,
+        "pi_hours_saved": -5.090000000000003
+      }
+    },
+    "word-round-trip": {
+      "lever": "PI reviews Word, changes merged back",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 359.57166666666666,
+        "days_to_finding_mean": 135.75185961377176,
+        "correct_per_year_mean": 5.397403467021244,
+        "flawed_per_finding_mean": 0.05509884559884559,
+        "pi_hours_mean": 32.858958333333334
+      },
+      "alone_gain": {
+        "days_saved": 54.778333333333364,
+        "correct_per_year_ratio": 1.1360692705711573,
+        "flawed_per_finding_change": -0.001282384282384294,
+        "pi_hours_saved": 7.515000000000001
+      }
+    },
+    "browser-review": {
+      "lever": "PI reviews in browser",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 360.8983333333333,
+        "days_to_finding_mean": 132.951592873107,
+        "correct_per_year_mean": 5.47259911024384,
+        "flawed_per_finding_mean": 0.0457946497946498,
+        "pi_hours_mean": 33.01479166666667
+      },
+      "alone_gain": {
+        "days_saved": 53.45166666666671,
+        "correct_per_year_ratio": 1.1518967809783365,
+        "flawed_per_finding_change": -0.010586580086580089,
+        "pi_hours_saved": 7.359166666666667
+      },
+      "dropped": {
+        "days_mean": 302.2866666666667,
+        "days_to_finding_mean": 124.0056309584098,
+        "correct_per_year_mean": 6.737418935542224,
+        "flawed_per_finding_mean": 0.00037037037037037035,
+        "pi_hours_mean": 16.152395833333333
+      },
+      "dropped_loss": {
+        "days_saved": 29.191666666666663,
+        "correct_per_year_ratio": 1.0978624412577438,
+        "flawed_per_finding_change": 4.629629629629634e-05,
+        "pi_hours_saved": 2.5557291666666675
+      }
+    },
+    "reviews-between-meetings": {
+      "lever": "reviews between meetings",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 419.5183333333333,
+        "days_to_finding_mean": 174.0943641029702,
+        "correct_per_year_mean": 4.659651620454366,
+        "flawed_per_finding_mean": 0.06937229437229436,
+        "pi_hours_mean": 42.675624999999975
+      },
+      "alone_gain": {
+        "days_saved": -5.168333333333294,
+        "correct_per_year_ratio": 0.9807840102950132,
+        "flawed_per_finding_change": 0.012991064491064477,
+        "pi_hours_saved": -2.301666666666641
+      },
+      "dropped": {
+        "days_mean": 276.24666666666667,
+        "days_to_finding_mean": 106.96016232981597,
+        "correct_per_year_mean": 7.359856778504647,
+        "flawed_per_finding_mean": 0.0015833333333333333,
+        "pi_hours_mean": 12.350625
+      },
+      "dropped_loss": {
+        "days_saved": 3.1516666666666424,
+        "correct_per_year_ratio": 1.0050140135815777,
+        "flawed_per_finding_change": -0.0011666666666666665,
+        "pi_hours_saved": -1.246041666666665
+      }
+    },
+    "focused-review": {
+      "lever": "one answer at a time with evidence",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 370.20166666666665,
+        "days_to_finding_mean": 150.56848853629782,
+        "correct_per_year_mean": 5.437874338968287,
+        "flawed_per_finding_mean": 0.0445531043031043,
+        "pi_hours_mean": 29.05583333333333
+      },
+      "alone_gain": {
+        "days_saved": 44.14833333333337,
+        "correct_per_year_ratio": 1.1445877580722652,
+        "flawed_per_finding_change": -0.011828125578125584,
+        "pi_hours_saved": 11.318125000000006
+      },
+      "dropped": {
+        "days_mean": 274.225,
+        "days_to_finding_mean": 107.78298644508385,
+        "correct_per_year_mean": 7.34827477702081,
+        "flawed_per_finding_mean": 0.0,
+        "pi_hours_mean": 13.9240625
+      },
+      "dropped_loss": {
+        "days_saved": 1.1299999999999955,
+        "correct_per_year_ratio": 1.006598068907459,
+        "flawed_per_finding_change": 0.0004166666666666667,
+        "pi_hours_saved": 0.327395833333334
+      }
+    },
+    "recheck-evidence": {
+      "lever": "answers rechecked against evidence",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 399.55,
+        "days_to_finding_mean": 158.83170197557067,
+        "correct_per_year_mean": 4.983529700154124,
+        "flawed_per_finding_mean": 0.04033261183261183,
+        "pi_hours_mean": 38.16375
+      },
+      "alone_gain": {
+        "days_saved": 14.800000000000011,
+        "correct_per_year_ratio": 1.0489552959894577,
+        "flawed_per_finding_change": -0.016048618048618055,
+        "pi_hours_saved": 2.210208333333334
+      },
+      "dropped": {
+        "days_mean": 278.47,
+        "days_to_finding_mean": 108.96372029366765,
+        "correct_per_year_mean": 7.389990774097842,
+        "flawed_per_finding_mean": 0.0004166666666666667,
+        "pi_hours_mean": 14.459270833333333
+      },
+      "dropped_loss": {
+        "days_saved": 5.375,
+        "correct_per_year_ratio": 1.0009158910287705,
+        "flawed_per_finding_change": 0.0,
+        "pi_hours_saved": 0.8626041666666673
+      }
+    },
+    "questions-first": {
+      "lever": "findings start from written questions",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 361.85833333333335,
+        "days_to_finding_mean": 145.60603542807357,
+        "correct_per_year_mean": 5.558725388239946,
+        "flawed_per_finding_mean": 0.024885762385762386,
+        "pi_hours_mean": 34.422291666666666
+      },
+      "alone_gain": {
+        "days_saved": 52.491666666666674,
+        "correct_per_year_ratio": 1.1700250195689648,
+        "flawed_per_finding_change": -0.0314954674954675,
+        "pi_hours_saved": 5.951666666666668
+      },
+      "dropped": {
+        "days_mean": 304.2,
+        "days_to_finding_mean": 117.15747355604537,
+        "correct_per_year_mean": 6.574101332615223,
+        "flawed_per_finding_mean": 0.04028379028379028,
+        "pi_hours_mean": 15.672291666666666
+      },
+      "dropped_loss": {
+        "days_saved": 31.10499999999996,
+        "correct_per_year_ratio": 1.1251361708791996,
+        "flawed_per_finding_change": -0.03986712361712361,
+        "pi_hours_saved": 2.0756250000000005
+      }
+    },
+    "agent-pi-review": {
+      "lever": "agent-assisted PI review",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 366.7916666666667,
+        "days_to_finding_mean": 160.73396540041625,
+        "correct_per_year_mean": 5.409016662224017,
+        "flawed_per_finding_mean": 0.048462361712361714,
+        "pi_hours_mean": 20.73125
+      },
+      "alone_gain": {
+        "days_saved": 47.55833333333334,
+        "correct_per_year_ratio": 1.1385136670821145,
+        "flawed_per_finding_change": -0.007918868168868172,
+        "pi_hours_saved": 19.642708333333335
+      },
+      "dropped": {
+        "days_mean": 284.5933333333333,
+        "days_to_finding_mean": 107.63471225635556,
+        "correct_per_year_mean": 7.098937386987642,
+        "flawed_per_finding_mean": 0.0,
+        "pi_hours_mean": 20.58529166666666
+      },
+      "dropped_loss": {
+        "days_saved": 11.498333333333278,
+        "correct_per_year_ratio": 1.0419530131240207,
+        "flawed_per_finding_change": 0.0004166666666666667,
+        "pi_hours_saved": 6.988624999999994
+      }
+    },
+    "shared-submission": {
+      "lever": "project shared with submission",
+      "baseline": "tooled",
+      "alone": {
+        "days_mean": 417.38666666666666,
+        "days_to_finding_mean": 170.75380550927096,
+        "correct_per_year_mean": 4.861025473027285,
+        "flawed_per_finding_mean": 0.04649446849446849,
+        "pi_hours_mean": 41.62291666666667
+      },
+      "alone_gain": {
+        "days_saved": -3.0366666666666333,
+        "correct_per_year_ratio": 1.0231700663314867,
+        "flawed_per_finding_change": -0.009886761386761395,
+        "pi_hours_saved": -1.2489583333333343
+      },
+      "dropped": {
+        "days_mean": 269.9066666666667,
+        "days_to_finding_mean": 103.55666360247322,
+        "correct_per_year_mean": 7.463651580253275,
+        "flawed_per_finding_mean": 0.00037037037037037035,
+        "pi_hours_mean": 13.378125
+      },
+      "dropped_loss": {
+        "days_saved": -3.1883333333333326,
+        "correct_per_year_ratio": 0.9910375800392776,
+        "flawed_per_finding_change": 4.629629629629634e-05,
+        "pi_hours_saved": -0.21854166666666508
+      }
+    }
+  }
+}

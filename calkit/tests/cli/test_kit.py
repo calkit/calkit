@@ -9,6 +9,7 @@ import zipfile
 import git
 from typer.testing import CliRunner
 
+import calkit
 import calkit.hub
 import calkit.kits
 from calkit.cli.main import app
@@ -53,6 +54,36 @@ def test_create(kit_project, monkeypatch, tmp_path):
     )
     assert res.exit_code == 0, res.stdout
     assert len(calkit.kits.get_records()) == 1
+    # Changes elsewhere in the project, even to calkit.yaml, don't stop a
+    # calkit being created and recorded, but changes to what's in it do
+    ck_info = calkit.load_calkit_info()
+    ck_info["title"] = "New title"
+    ck_info["pipeline"]["stages"]["other"] = {
+        "kind": "command",
+        "environment": "_system",
+        "command": "echo hi > other.txt",
+        "outputs": ["other.txt"],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("notes.md", "w") as f:
+        f.write("Notes\n")
+    subprocess.check_call(["git", "add", "notes.md"])
+    res = runner.invoke(app, ["kit", "create", "figures/fig.svg"])
+    assert res.exit_code == 0, res.stdout
+    assert "Recorded as tag kit/figures/fig.svg/" in res.stdout
+    kit = calkit.kits.read("fig.calkit.svg")
+    assert kit is not None
+    assert kit.manifest.source.uncommitted_paths == []
+    with open(".dvcignore", "a") as f:
+        f.write("# changed\n")
+    res = runner.invoke(app, ["kit", "create", "figures/fig.svg"])
+    assert res.exit_code != 0
+    assert "Uncommitted changes: .dvcignore" in res.stdout + str(res.stderr)
+    subprocess.check_call(
+        ["git", "checkout", "calkit.yaml", "dvc.yaml", ".dvcignore"]
+    )
+    subprocess.check_call(["git", "rm", "-q", "--cached", "notes.md"])
     # Data that doesn't fit is left out and reported
     res = runner.invoke(
         app,
@@ -88,7 +119,11 @@ def test_create(kit_project, monkeypatch, tmp_path):
     assert "isn't recorded" in res.stdout + str(res.stderr)
     # Only the calkits created normally are recorded
     paths = [r["artifact_path"] for r in calkit.kits.get_records()]
-    assert sorted(paths) == ["figures/fig.pdf", "figures/fig.png"]
+    assert sorted(paths) == [
+        "figures/fig.pdf",
+        "figures/fig.png",
+        "figures/fig.svg",
+    ]
     subprocess.check_call(["dvc", "checkout", "-q", "--force", "data/raw.csv"])
     # Copied to the clipboard as a file
     copied = []

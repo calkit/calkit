@@ -42,8 +42,10 @@ Whatever is left out is still listed, with its hash,
 so an expanded copy can fetch it from the project's storage
 or remake it by running the pipeline.
 
-The pipeline must be up to date and committed,
+The calkit's part of the pipeline must be up to date and committed,
 since a calkit records how the file was made.
+Changes elsewhere in the project, even to other stages in `calkit.yaml`,
+don't matter.
 Use `--force` to create one anyway;
 the calkit says it was out of date and lists uncommitted changes,
 and one with uncommitted changes isn't recorded.

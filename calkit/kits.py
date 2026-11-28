@@ -648,6 +648,9 @@ def build(
     # Environment specs Calkit generates, e.g., for 'calkit xr', live in
     # .calkit/envs, beside their lock files
     pruned_ck_info = calkit.ryaml.load(overrides["calkit.yaml"]) or {}
+    kept_stage_names = list(
+        ((pruned_ck_info.get("pipeline") or {}).get("stages") or {}).keys()
+    )
     env_dirs = {
         posixpath.dirname(Path(env["path"]).as_posix())
         for env in (pruned_ck_info.get("environments") or {}).values()
@@ -773,6 +776,48 @@ def build(
         "--porcelain", "--untracked-files=no"
     ).splitlines():
         uncommitted.add(line[3:].split(" -> ")[-1].strip('"'))
+    # Files every stage shares, e.g., calkit.yaml, only count as changed if
+    # this calkit's stages or environments in them did, so editing or
+    # rerunning another stage doesn't stop sharing this one, and the run
+    # records and DVC config are only context
+    pipeline_keys: dict[str, list[tuple[str, str | None, set[str]]]] = {
+        "calkit.yaml": [
+            ("pipeline", "stages", set(kept_stage_names)),
+            (
+                "environments",
+                None,
+                set(pruned_ck_info.get("environments") or {}),
+            ),
+        ],
+        "dvc.yaml": [("stages", None, set(stage_io))],
+        "dvc.lock": [("stages", None, set(stage_io))],
+    }
+    for name in overrides:
+        if name not in uncommitted:
+            continue
+        if name not in pipeline_keys:
+            uncommitted.discard(name)
+            continue
+        try:
+            committed = calkit.ryaml.load(repo.git.show(f"HEAD:{name}")) or {}
+        except Exception:
+            continue
+        with open(name) as current_file:
+            current = calkit.ryaml.load(current_file) or {}
+        changed = False
+        for key, sub_key, names in pipeline_keys[name]:
+            old = committed.get(key) or {}
+            new = current.get(key) or {}
+            if sub_key is not None:
+                old = (old if isinstance(old, dict) else {}).get(sub_key) or {}
+                new = (new if isinstance(new, dict) else {}).get(sub_key) or {}
+            for n in names:
+                if json.dumps(old.get(n), default=str, sort_keys=True) != (
+                    json.dumps(new.get(n), default=str, sort_keys=True)
+                ):
+                    changed = True
+        if not changed:
+            uncommitted.discard(name)
     for p, content in included.items():
         recorded_md5 = (dvc_files.get(p) or {}).get("md5")
         if recorded_md5 and hashlib.md5(content).hexdigest() != recorded_md5:

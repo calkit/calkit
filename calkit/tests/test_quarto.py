@@ -489,7 +489,10 @@ def test_provenance_records(tmp_path: Path) -> None:
             "outs": [{"figures/plot.svg": {"cache": False}}],
         },
         "fit": {"cmd": "calkit nb execute fit.ipynb", "outs": [values_path]},
-        "report": {"cmd": "calkit quarto render report.qmd", "wdir": "pub"},
+        "report": {
+            "cmd": "calkit doc quarto render report.qmd",
+            "wdir": "pub",
+        },
     }
     lock_stages: dict[str, dict] = {
         "clean": {
@@ -516,7 +519,7 @@ def test_provenance_records(tmp_path: Path) -> None:
             "outs": [get_entry(values_path)],
         },
         "report": {
-            "cmd": "calkit quarto render report.qmd",
+            "cmd": "calkit doc quarto render report.qmd",
             "deps": [get_entry("report.qmd"), get_entry("own.png")],
             "outs": [get_entry("report.html"), get_entry("own.png")],
         },

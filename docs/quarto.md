@@ -30,7 +30,7 @@ like any other tool a stage runs,
 so a document renders with the same version on every machine:
 add `quarto` to a Conda or Pixi environment,
 or `quarto-cli` to a uv or pip one.
-The stage renders with `calkit quarto render`,
+The stage renders with `calkit doc quarto render`,
 which checks that the environment has it included, i.e.,
 that it's not actually on the path from a system-wide install,
 and fails rather than quietly using whatever version is installed on the
@@ -187,7 +187,7 @@ filters:
     path: calkit
 ```
 
-`calkit quarto render` fails if it's not listed, saying so,
+`calkit doc quarto render` fails if it's not listed, saying so,
 rather than rendering the divs as plain ones.
 
 ## Showing where figures, tables, and values came from

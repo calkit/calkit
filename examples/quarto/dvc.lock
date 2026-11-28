@@ -21,7 +21,8 @@ stages:
       md5: df42206b92f58bee9822430cf38f0769
       size: 81
   analysis:
-    cmd: calkit quarto render -e quarto --no-check analysis.ipynb -- --execute
+    cmd: calkit doc quarto render -e quarto --no-check analysis.ipynb -- 
+      --execute
     deps:
     - path: .calkit/notebooks/cleaned/analysis.ipynb
       hash: md5
@@ -50,8 +51,8 @@ stages:
     outs:
     - path: analysis.html
       hash: md5
-      md5: df46bf3f922c5710bde50bdf860bdb57
-      size: 4102416
+      md5: 10a7163fd4e83664edc6b10e561f97ec
+      size: 4103353
     - path: figures/peaks.svg
       hash: md5
       md5: 75507941e5eb876589ec9df1f1786fb0
@@ -65,16 +66,16 @@ stages:
       md5: dfbe599da148cc4165dd7d2d96ec3a70
       size: 280
   report:
-    cmd: calkit quarto render -e quarto --no-check report.qmd
+    cmd: calkit doc quarto render -e quarto --no-check report.qmd
     deps:
     - path: analysis.html
       hash: md5
-      md5: df46bf3f922c5710bde50bdf860bdb57
-      size: 4102416
+      md5: 10a7163fd4e83664edc6b10e561f97ec
+      size: 4103353
     - path: analysis.ipynb
       hash: md5
-      md5: 79aa513e2562a32a974fdd896ebde0d6
-      size: 79291
+      md5: e1191231e25dbbd1d63d8f402f109fea
+      size: 79277
     - path: data/sim.csv
       hash: md5
       md5: 05a12e0f23928d3253961d6ed3a6c3af
@@ -106,8 +107,8 @@ stages:
     outs:
     - path: report.html
       hash: md5
-      md5: 2f58fec915ba8252f4ddcd6bbbd9771e
-      size: 4270807
+      md5: 8313bc0e3d9da2bc5dee7e7155e0d45b
+      size: 4274063
   energy:
     cmd: calkit xenv -n quarto --no-check -- python scripts/energy.py
     deps:

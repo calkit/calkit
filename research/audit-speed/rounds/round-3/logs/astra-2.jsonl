@@ -1,0 +1,16 @@
+{"t": 1795828186.483928, "action": "run -- astra info", "words": 511, "cost_s": 147.8}
+{"t": 1795828186.52212, "action": "ls", "words": 16, "cost_s": 9.0}
+{"t": 1795828190.481604, "action": "file index.md 1 60", "words": 181, "cost_s": 45.2}
+{"t": 1795828194.0313962, "action": "grep -n findings: astra.yaml", "words": 1, "cost_s": 15.2}
+{"t": 1795828198.567766, "action": "file astra.yaml 81 80", "words": 313, "cost_s": 78.2}
+{"t": 1795828202.370255, "action": "file astra.yaml 160 9", "words": 34, "cost_s": 8.5}
+{"t": 1795828202.4390101, "action": "ls results", "words": 3, "cost_s": 5.8}
+{"t": 1795828205.7674088, "action": "ls results/baseline", "words": 6, "cost_s": 6.5}
+{"t": 1795828209.3801332, "action": "file results/baseline/model_results.json 1 60", "words": 42, "cost_s": 10.5}
+{"t": 1795828213.882297, "action": "grep treatment results/change_score/model_results.json", "words": 12, "cost_s": 18.0}
+{"t": 1795828213.920338, "action": "run -- wc -l src/prepare_data.py src/fit_model.py", "words": 6, "cost_s": 21.5}
+{"t": 1795828218.630095, "action": "file src/prepare_data.py 1 46", "words": 0, "cost_s": 110.4}
+{"t": 1795828223.2659469, "action": "grep -iE education|arm|sex|status|age codebook.md", "words": 51, "cost_s": 27.8}
+{"t": 1795828227.653613, "action": "grep -nE formula|change|age|mean|female|Treatment|C\\( src/fit_model.py", "words": 82, "cost_s": 35.5}
+{"t": 1795828232.449665, "action": "run -- git log --oneline -8", "words": 47, "cost_s": 31.8}
+{"t": 1795828237.3816981, "action": "run -- git show -U0 cc0373a -- astra.yaml", "words": 360, "cost_s": 110.0}

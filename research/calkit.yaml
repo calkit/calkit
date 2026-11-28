@@ -1,57 +1,45 @@
 name: research
 title: Research
 description: >-
-  Studies of claims about Calkit as a product, e.g., how it compares with
-  other tools, run in rounds that add to the record rather than replace it.
+  Product research for Calkit: which problems in an analysis change its
+  conclusions but get past auditors, and what would catch them, run in
+  studies and rounds that add to the record rather than replace it.
 
 questions:
   - question: >-
-      How long does it take an agent to audit a claim in an agent-made
-      analysis built with Calkit, ASTRA, or OpenResearch?
+      With unlimited reading, do agent auditors need a research tool to find
+      the bugs in a small analysis?
     answer:
-      if n_found == n_arms and min_runs == 1: >-
-        Round 1 doesn't separate the tools. With one run per tool, all
-        {n_arms} agent auditors found the bug planted in the analysis, in
-        {min_s:.0f} to {max_s:.0f} s (Calkit {calkit_s:.0f} s, ASTRA
-        {astra_s:.0f} s, OpenResearch {orx_s:.0f} s), and all from the same
-        giveaway: the report says participants with missing SES were
-        excluded, yet its sample is everyone enrolled.
+      if r1_found == r1_runs and r2_merge == r2_merge_n and r2_fastest == "none": >-
+        No. In round 1, each of the {r1_runs} auditors, one per tool, found
+        the planted bug, in {r1_min_s:.0f} to {r1_max_s:.0f} s, from the
+        same giveaway: the report says participants with missing SES were
+        excluded, yet its sample is everyone enrolled. In round 2, with
+        subtler bugs and {r2_min_runs} audits per arm, all {r2_merge_n}
+        auditors found the merge that silently dropped a site, and the arm
+        with no framework or version control was fastest (mean {none_s:.0f}
+        s, against Calkit {calkit_s:.0f} s, ASTRA {astra_s:.0f} s, and
+        OpenResearch {orx_s:.0f} s). The arms differed only on the bug in
+        the model's reference level (Calkit {calkit_ref}/{calkit_ref_n},
+        ASTRA {astra_ref}/{astra_ref_n}, no framework
+        {none_ref}/{none_ref_n}, OpenResearch {orx_ref}/{orx_ref_n}), too
+        few runs to call. Calkit kept a stale number out of the report by
+        filling numbers in from results; in every other arm, auditors found
+        it by matching numbers to files by hand.
       else: >-
         Not settled; see results/audit-speed.md for every run.
     evidence:
       - kind: result
         path: results/audit-speed.json
         values:
-          n_arms: rounds.1.n_arms
-          n_found: rounds.1.n_found_bug
-          min_runs: rounds.1.min_runs_per_arm
-          min_s: rounds.1.seconds.min
-          max_s: rounds.1.seconds.max
-          calkit_s: rounds.1.arms.calkit.seconds.0
-          astra_s: rounds.1.arms.astra.seconds.0
-          orx_s: rounds.1.arms.openresearch.seconds.0
-      - kind: table
-        path: results/audit-speed.md
-
-  - question: >-
-      With subtler bugs and three agent audits per arm, does any tool help
-      agents find the problems in an analysis faster or more reliably than
-      working without one?
-    answer: >-
-      Not faster: the arm with no framework or version control was fastest
-      (mean {none_s:.0f} s), then Calkit ({calkit_s:.0f} s), ASTRA
-      ({astra_s:.0f} s), and OpenResearch ({orx_s:.0f} s), and every
-      auditor found the merge that silently dropped a site. The arms
-      differed only on the bug in the model's reference level (Calkit
-      {calkit_ref}/{calkit_ref_n}, ASTRA {astra_ref}/{astra_ref_n}, no
-      framework {none_ref}/{none_ref_n}, OpenResearch
-      {orx_ref}/{orx_ref_n}), too few runs to call. Calkit kept a stale
-      number out of the report by filling numbers in from results; in every
-      other arm, auditors found it by matching numbers to files by hand.
-    evidence:
-      - kind: result
-        path: results/audit-speed.json
-        values:
+          r1_runs: rounds.1.n_runs
+          r1_found: rounds.1.n_found_bug
+          r1_min_s: rounds.1.seconds.min
+          r1_max_s: rounds.1.seconds.max
+          r2_min_runs: rounds.2.min_runs_per_arm
+          r2_merge: rounds.2.found.merge.found
+          r2_merge_n: rounds.2.found.merge.possible
+          r2_fastest: rounds.2.fastest_arm
           none_s: rounds.2.arms.none.mean_seconds
           calkit_s: rounds.2.arms.calkit.mean_seconds
           astra_s: rounds.2.arms.astra.mean_seconds
@@ -67,11 +55,163 @@ questions:
       - kind: table
         path: results/audit-speed.md
 
+  - question: >-
+      At human reading speed, which problems in a small analysis do agent
+      auditors miss?
+    answer:
+      if v2_merge == 0 and v2_stale == v2_stale_n and v2_min < v2_budget and v1_merge == rec_merge: >-
+        The silent row loss. Reading through a tool that charges a person's
+        time, with realistic costs (a {v2_budget} min budget, code read at
+        {v2_code} lines per min, and {v2_script} min to write a script of
+        one's own), none of the {v2_merge_n} auditors, one per arm, caught
+        the merge that dropped a site. They matched numbers to saved
+        outputs or reran the authors' pipeline, which reproduces the bug,
+        and stopped with time left (mean {v2_min:.1f} min). Cheap checks
+        still got done: the stale typed number was found in
+        {v2_stale}/{v2_stale_n} arms where it could occur, and the wrong
+        reference level, visible in the code, in {v2_ref}/{v2_ref_n}. With
+        scripts cheaper to write ({v1_script} min), the row loss was found
+        only by auditors who recomputed results with their own scripts
+        ({rec_merge} of {rec_n}).
+      else: >-
+        Not settled; see results/audit-speed.md for every run.
+    evidence:
+      - kind: result
+        path: results/audit-speed.json
+        values:
+          v2_budget: rounds.3.settings.v2.costs.budget_min
+          v2_code: rounds.3.settings.v2.costs.code_lines_per_min
+          v2_script: rounds.3.settings.v2.costs.own_script_min
+          v2_merge: rounds.3.settings.v2.found.merge.found
+          v2_merge_n: rounds.3.settings.v2.found.merge.possible
+          v2_min: rounds.3.settings.v2.mean_simulated_minutes
+          v2_stale: rounds.3.settings.v2.found.stale_number.found
+          v2_stale_n: rounds.3.settings.v2.found.stale_number.possible
+          v2_ref: rounds.3.settings.v2.found.reference_level.found
+          v2_ref_n: rounds.3.settings.v2.found.reference_level.possible
+          v1_script: rounds.3.settings.v1.costs.own_script_min
+          v1_merge: rounds.3.settings.v1.found.merge.found
+          rec_n: rounds.3.checked_by.recomputed with own scripts.n_runs
+          rec_merge: rounds.3.checked_by.recomputed with own scripts.found.merge.found
+      - kind: table
+        path: results/audit-speed.md
+
+  - question: >-
+      Do agent auditors catch the data problems that changed conclusions in
+      published work?
+    answer:
+      if hr_n - hr_found == 1 and m_leak == 0 and m_n == 2: >-
+        Not reliably, even with unlimited reading. In Hill & Roberts
+        (2023), {edu_n} of {edu_nv:,} respondents' education is coded
+        {edu_code} (the survey platform's "none of the above") and used as
+        a continuous covariate; dropping them reverses the association
+        between education and acquiescence (corrigendum
+        doi:10.1017/pan.2024.27). {hr_found} of {hr_n} auditors found it;
+        the other never tabulated the raw education values. In Muchlinski
+        et al. (2016), {m_fig}/{m_n} found the ROC figure's AUC disagreeing
+        with the text (Wang 2019), but {m_leak}/{m_n} found the leak that
+        Kapoor & Narayanan (2023) show erases the random forest's advantage
+        over logistic regression: imputation fit on training and test data
+        together. The imputation step isn't in the package, and both
+        auditors flagged it as missing.
+      else: >-
+        Not settled; see results/real-packages.md for every run.
+    evidence:
+      - kind: result
+        path: results/real-packages.json
+        values:
+          hr_found: packages.hill-roberts-2023.found.sentinel
+          hr_n: packages.hill-roberts-2023.n_runs
+          m_fig: packages.muchlinski-2016.found.figure_mismatch
+          m_leak: packages.muchlinski-2016.found.leakage
+          m_n: packages.muchlinski-2016.n_runs
+      - kind: result
+        path: results/hill-roberts-profile.json
+        values:
+          edu_n: files.data/LucidWideFile.csv.flags.education.0.n
+          edu_nv: files.data/LucidWideFile.csv.flags.education.0.n_values
+          edu_code: files.data/LucidWideFile.csv.flags.education.0.examples.0
+      - kind: table
+        path: results/real-packages.md
+
+  - question: >-
+      Would an automatic data profile have surfaced the problems auditors
+      missed?
+    answer:
+      if n_files_flagged == 1 and edu_n > 0 and lucid_edu_n == edu_n: >-
+        For the sentinel code, yes. Two generic rules per numeric column,
+        knowing nothing about the answer (a few negatives in an otherwise
+        non-negative column, and values far outside the 1st-99th percentile
+        span), raised {n_flags} flags in {n_columns} columns, all in
+        {n_files_flagged} of the archive's {n_files} files: the {edu_code}
+        code in education and lucid_education ({edu_n} values each), and
+        {hhi_code} in lucid_hhi ({hhi_n} values), not in the corrigendum's
+        summary and not yet confirmed as a problem. These rules can't see the
+        other two problems. Muchlinski et al.'s leakage is in an imputation
+        step the package doesn't include, and round 3's dropped site is a
+        loss of rows, which needs row counts in and out of the merge, i.e.,
+        a profile at each stage boundary rather than of the inputs alone,
+        the part still to build.
+      else: >-
+        Not settled; see results/hill-roberts-profile.json.
+    evidence:
+      - kind: result
+        path: results/hill-roberts-profile.json
+        values:
+          n_files: n_files
+          n_files_flagged: n_files_flagged
+          n_columns: n_columns_flagged
+          n_flags: n_flags
+          edu_n: files.data/LucidWideFile.csv.flags.education.0.n
+          edu_code: files.data/LucidWideFile.csv.flags.education.0.examples.0
+          lucid_edu_n: files.data/LucidWideFile.csv.flags.lucid_education.0.n
+          hhi_n: files.data/LucidWideFile.csv.flags.lucid_hhi.0.n
+          hhi_code: files.data/LucidWideFile.csv.flags.lucid_hhi.0.examples.0
+
+  - question: >-
+      What would catch the problems that change conclusions but that
+      auditors skip?
+    answer:
+      if v2_merge == 0 and hr_found < hr_n and n_flags > 0: >-
+        Checks of the data recorded for the auditor rather than left to
+        them. The problems missed that were in the package to find are
+        ones found only by looking at the data itself: the merge that
+        dropped a site, missed by all {v2_merge_n} auditors at a person's
+        reading speed, and a sentinel code used as data, found by only
+        {hr_found} of {hr_n} with unlimited reading. Auditors skip that work
+        when time is short or the code looks right, while cheap checks,
+        e.g., typed numbers against saved outputs, got done. A generic profile flagged the sentinel with no
+        knowledge of it ({n_flags} flags in all), so recording one at every
+        stage boundary, i.e., rows in and out, values outside a column's
+        usual pattern, duplicate keys, and missingness, and showing it
+        along the path a reader already takes from question to evidence to
+        stage, should catch both. A problem in a step left out of the
+        package, like Muchlinski et al.'s leakage, needs the step itself.
+        Untested: whether auditors read the profile when it's shown, and how
+        many false flags it raises across more packages.
+      else: >-
+        Not settled; see the answers to the questions above.
+    evidence:
+      - kind: result
+        path: results/audit-speed.json
+        values:
+          v2_merge: rounds.3.settings.v2.found.merge.found
+          v2_merge_n: rounds.3.settings.v2.found.merge.possible
+      - kind: result
+        path: results/real-packages.json
+        values:
+          hr_found: packages.hill-roberts-2023.found.sentinel
+          hr_n: packages.hill-roberts-2023.n_runs
+      - kind: result
+        path: results/hill-roberts-profile.json
+        values:
+          n_flags: n_flags
+
 environments:
   main:
     kind: uv
     path: pyproject.toml
-    description: Python alone, for summarizing results.
+    description: Python with pandas, for summarizing results and profiling data.
 
 pipeline:
   stages:
@@ -89,6 +229,71 @@ pipeline:
           storage: git
         - path: results/audit-speed.md
           storage: git
+    summarize-real-packages:
+      kind: python-script
+      script_path: scripts/summarize-real-packages.py
+      environment: main
+      description: >-
+        Count which known problems agent audits of published replication
+        packages found.
+      inputs:
+        - real-packages/audits.json
+      outputs:
+        - path: results/real-packages.json
+          storage: git
+        - path: results/real-packages.md
+          storage: git
+    import-hill-roberts:
+      kind: python-script
+      frozen: true
+      script_path: scripts/import-dataverse-file.py
+      environment: main
+      description: >-
+        Download the Hill & Roberts (2023) replication archive as first
+        deposited (version 1.0, before the corrigendum), verifying the
+        checksum Dataverse reports. Frozen once run, since it needs the
+        network and the version can't change.
+      args:
+        - --doi=10.7910/DVN/TVJCTX
+        - --version=1.0
+        - --file-id=6558488
+        - --output=real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+        - --metadata-output=real-packages/hill-roberts-2023/dataverse.json
+      outputs:
+        - real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+        - path: real-packages/hill-roberts-2023/dataverse.json
+          storage: git
+    profile-hill-roberts:
+      kind: python-script
+      script_path: scripts/profile-data.py
+      environment: main
+      description: >-
+        Flag values outside each numeric column's pattern in every CSV of
+        the Hill & Roberts archive, with generic rules that know nothing
+        about its known problem.
+      args:
+        - real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+        - --output=results/hill-roberts-profile.json
+      inputs:
+        - from_stage_outputs: import-hill-roberts
+      outputs:
+        - path: results/hill-roberts-profile.json
+          storage: git
+
+datasets:
+  - path: real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+    title: Hill & Roberts (2023) replication archive, version 1.0
+    description: >-
+      The replication package for Hill & Roberts (2023), Political Analysis,
+      as first deposited, before the corrigendum (doi:10.1017/pan.2024.27).
+      CC0 1.0, per real-packages/hill-roberts-2023/dataverse.json.
+    stage: import-hill-roberts
+    imported_from:
+      url: https://dataverse.harvard.edu/api/access/datafile/6558488
+      date: 2026-11-27
+      description: >-
+        Harvard Dataverse doi:10.7910/DVN/TVJCTX, version 1.0, file
+        6558488.
 
 tables:
   - path: results/audit-speed.md
@@ -97,3 +302,9 @@ tables:
       Each agent audit of a claim in the audit-speed study, by round and
       tool: whether it found the planted bug, and how long it took.
     stage: summarize-audit-speed
+  - path: results/real-packages.md
+    title: Agent audits of published replication packages
+    description: >-
+      Each agent audit of a published replication package with publicly
+      documented problems: which of them it found, and what else it raised.
+    stage: summarize-real-packages

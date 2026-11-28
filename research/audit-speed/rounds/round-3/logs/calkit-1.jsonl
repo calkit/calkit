@@ -1,0 +1,15 @@
+{"t": 1795827862.185225, "action": "run -- uv run --project <calkit-repo> calkit list questions", "words": 45, "cost_s": 31.2}
+{"t": 1795827866.443187, "action": "run -- uv run --project <calkit-repo> calkit show question 1", "words": 231, "cost_s": 77.8}
+{"t": 1795827870.0901382, "action": "file results/report.md 1 60", "words": 321, "cost_s": 80.2}
+{"t": 1795827874.011482, "action": "ls .", "words": 17, "cost_s": 9.2}
+{"t": 1795827874.048527, "action": "ls scripts", "words": 4, "cost_s": 6.0}
+{"t": 1795827874.08481, "action": "ls data", "words": 3, "cost_s": 5.8}
+{"t": 1795827877.39144, "action": "file scripts/prepare_data.py 1 80", "words": 149, "cost_s": 37.2}
+{"t": 1795827882.329474, "action": "file scripts/fit_model.py 1 80", "words": 186, "cost_s": 46.5}
+{"t": 1795827889.534982, "action": "run -- uv run --project <calkit-repo> calkit status", "words": 49, "cost_s": 32.2}
+{"t": 1795827893.4459362, "action": "ls data/raw", "words": 2, "cost_s": 5.5}
+{"t": 1795827893.482791, "action": "file codebook.md 1 60", "words": 231, "cost_s": 57.8}
+{"t": 1795827898.1721652, "action": "file dvc.yaml 1 50", "words": 154, "cost_s": 38.5}
+{"t": 1795827914.22399, "action": "run --wrote -- .venv/bin/python -I <scratch>/audwork.0WuL/check.py <scratch>/audit-compare-r2/calkit", "words": 237, "cost_s": 179.2}
+{"t": 1795827923.360063, "action": "run --wrote -- .venv/bin/python -I <scratch>/audwork.0WuL/ids.py <scratch>/audit-compare-r2/calkit", "words": 37, "cost_s": 129.2}
+{"t": 1795827934.990269, "action": "run --wrote -- .venv/bin/python -I <scratch>/audwork.0WuL/fix.py <scratch>/audit-compare-r2/calkit", "words": 61, "cost_s": 135.2}

@@ -10,23 +10,110 @@ stages:
       size: 5
     - path: audit-speed/rounds
       hash: md5
-      md5: 82634c92bc2742bbbaa4d6f5b4118045.dir
-      size: 91153
-      nfiles: 33
+      md5: 24888065cedd07182ba21610825ddcaa.dir
+      size: 112544
+      nfiles: 43
     - path: scripts/summarize-audit-speed.py
       hash: md5
-      md5: 3bab8888f6dc3abe42e5be79f2837086
-      size: 3659
+      md5: 659d5bcb815708fb5ed66f8050bc1aa1
+      size: 6251
     - path: uv.lock
       hash: md5
-      md5: 6c402f04979b22d8c65c29b5785cce5b
-      size: 128
+      md5: 63a043152c18580990584c2cf682d069
+      size: 39173
     outs:
     - path: results/audit-speed.json
       hash: md5
-      md5: be91757f0b6baa72f7db4e471aff1e1f
-      size: 4920
+      md5: 33cb8dfc1778ac0c5dcbb61d179b2736
+      size: 12600
     - path: results/audit-speed.md
       hash: md5
-      md5: 7fa6e9d747ea20405c656ec3dd507045
-      size: 2043
+      md5: dc279e1b9632df669800acd1cdcdc429
+      size: 3176
+  summarize-real-packages:
+    cmd: calkit xenv -n main --no-check -- python 
+      scripts/summarize-real-packages.py
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: real-packages/audits.json
+      hash: md5
+      md5: 0bf6256c57808917e0139db20d9246a4
+      size: 1708
+    - path: scripts/summarize-real-packages.py
+      hash: md5
+      md5: 490513db7d445a88fad572d045eec2ba
+      size: 1532
+    - path: uv.lock
+      hash: md5
+      md5: 63a043152c18580990584c2cf682d069
+      size: 39173
+    outs:
+    - path: results/real-packages.json
+      hash: md5
+      md5: 2ec7421eaa89985dbedc981c8c0853dc
+      size: 423
+    - path: results/real-packages.md
+      hash: md5
+      md5: b188db1924c78672a6b36292bf182da9
+      size: 614
+  import-hill-roberts:
+    cmd: calkit xenv -n main --no-check -- python 
+      scripts/import-dataverse-file.py --doi=10.7910/DVN/TVJCTX --version=1.0 
+      --file-id=6558488 
+      --output=real-packages/hill-roberts-2023/HillRobertsRepArchive.zip 
+      --metadata-output=real-packages/hill-roberts-2023/dataverse.json
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/import-dataverse-file.py
+      hash: md5
+      md5: 551090ec4788ec48c225956eeaa1b0b1
+      size: 2704
+    - path: uv.lock
+      hash: md5
+      md5: 63a043152c18580990584c2cf682d069
+      size: 39173
+    outs:
+    - path: real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+      hash: md5
+      md5: ce64c99b006de8afe428e3a4a66081a5
+      size: 946455
+    - path: real-packages/hill-roberts-2023/dataverse.json
+      hash: md5
+      md5: 08f2523cddd939bb0dee8ad1f98a4b9a
+      size: 614
+  profile-hill-roberts:
+    cmd: calkit xenv -n main --no-check -- python scripts/profile-data.py 
+      real-packages/hill-roberts-2023/HillRobertsRepArchive.zip 
+      --output=results/hill-roberts-profile.json
+    deps:
+    - path: .python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+      hash: md5
+      md5: ce64c99b006de8afe428e3a4a66081a5
+      size: 946455
+    - path: real-packages/hill-roberts-2023/dataverse.json
+      hash: md5
+      md5: 08f2523cddd939bb0dee8ad1f98a4b9a
+      size: 614
+    - path: scripts/profile-data.py
+      hash: md5
+      md5: cdc35e4967ca4173c78212f14282e8be
+      size: 4209
+    - path: uv.lock
+      hash: md5
+      md5: 63a043152c18580990584c2cf682d069
+      size: 39173
+    outs:
+    - path: results/hill-roberts-profile.json
+      hash: md5
+      md5: d7861ba58b11e598b26c20f9dab0c473
+      size: 1940

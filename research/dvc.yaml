@@ -16,3 +16,54 @@ stages:
           persist: false
     desc: Automatically generated from the 'summarize-audit-speed' stage in
       calkit.yaml. Changes made here will be overwritten.
+  summarize-real-packages:
+    cmd: calkit xenv -n main --no-check -- python
+      scripts/summarize-real-packages.py
+    deps:
+      - scripts/summarize-real-packages.py
+      - real-packages/audits.json
+      - uv.lock
+      - .python-version
+    outs:
+      - results/real-packages.json:
+          cache: false
+          persist: false
+      - results/real-packages.md:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'summarize-real-packages' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  import-hill-roberts:
+    cmd: calkit xenv -n main --no-check -- python
+      scripts/import-dataverse-file.py --doi=10.7910/DVN/TVJCTX --version=1.0
+      --file-id=6558488
+      --output=real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+      --metadata-output=real-packages/hill-roberts-2023/dataverse.json
+    deps:
+      - scripts/import-dataverse-file.py
+      - uv.lock
+      - .python-version
+    outs:
+      - real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+      - real-packages/hill-roberts-2023/dataverse.json:
+          cache: false
+          persist: false
+    frozen: true
+    desc: Automatically generated from the 'import-hill-roberts' stage in
+      calkit.yaml. Changes made here will be overwritten.
+  profile-hill-roberts:
+    cmd: calkit xenv -n main --no-check -- python scripts/profile-data.py
+      real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+      --output=results/hill-roberts-profile.json
+    deps:
+      - scripts/profile-data.py
+      - uv.lock
+      - .python-version
+      - real-packages/hill-roberts-2023/HillRobertsRepArchive.zip
+      - real-packages/hill-roberts-2023/dataverse.json
+    outs:
+      - results/hill-roberts-profile.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'profile-hill-roberts' stage in
+      calkit.yaml. Changes made here will be overwritten.

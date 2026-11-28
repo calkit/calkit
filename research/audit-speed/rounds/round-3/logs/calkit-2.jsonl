@@ -1,0 +1,12 @@
+{"t": 1795828186.886539, "action": "run -- uv run --project <calkit-repo> calkit list questions", "words": 45, "cost_s": 31.2}
+{"t": 1795828191.215303, "action": "run -- uv run --project <calkit-repo> calkit show question 1", "words": 231, "cost_s": 77.8}
+{"t": 1795828195.421338, "action": "file results/report.md 1 60", "words": 321, "cost_s": 80.2}
+{"t": 1795828200.054515, "action": "ls results", "words": 4, "cost_s": 6.0}
+{"t": 1795828200.089498, "action": "ls scripts", "words": 4, "cost_s": 6.0}
+{"t": 1795828200.125271, "action": "ls .", "words": 17, "cost_s": 9.2}
+{"t": 1795828203.881202, "action": "file scripts/prepare_data.py 1 60", "words": 0, "cost_s": 110.4}
+{"t": 1795828208.532083, "action": "file scripts/fit_model.py 1 70", "words": 0, "cost_s": 146.4}
+{"t": 1795828214.868552, "action": "file results/model-ancova.json 1 30", "words": 42, "cost_s": 10.5}
+{"t": 1795828219.095716, "action": "file results/model-change.json 10 4", "words": 8, "cost_s": 2.0}
+{"t": 1795828219.137672, "action": "grep -i education\\|sex\\|status codebook.md", "words": 29, "cost_s": 22.2}
+{"t": 1795828226.055203, "action": "run -- uv run --project <calkit-repo> calkit show question 3", "words": 234, "cost_s": 78.5}

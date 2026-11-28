@@ -8,6 +8,17 @@ The archived release should then be cited in the article
 so readers can follow the citation back to the project
 files in order to reproduce or reuse the results.
 
+<!-- TODO: needs human review -->
+
+To share one figure or document along the way,
+e.g., in a chat or email,
+a [kit](kits.md) is lighter:
+a copy of the file that carries what made it.
+Each kit is recorded as a Git tag at the commit it came from,
+so it's clear which version of the project made it
+and what's changed since,
+with nothing to archive.
+
 ## Integrating with Zenodo
 
 Calkit can archive whole projects or individual artifacts to

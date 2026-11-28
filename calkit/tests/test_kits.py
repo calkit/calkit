@@ -651,3 +651,99 @@ def test_get_record_tag_name():
             "/2026-11-27-" + hashlib.sha256(b"kit").hexdigest()[:7]
         )
         subprocess.check_call(["git", "check-ref-format", f"refs/tags/{name}"])
+
+
+def test_get_source_changes(kit_project, tmp_path, tmp_path_factory):
+    def commit(message: str) -> str:
+        subprocess.check_call(["git", "add", "."])
+        subprocess.check_call(["git", "commit", "-qm", message])
+        return git.Repo().head.commit.hexsha[:7]
+
+    png_path = str(tmp_path_factory.mktemp("shared") / "fig.calkit.png")
+    calkit.kits.write_copy("figures/fig.png", png_path, up_to_date=True)
+    with open("README.md", "w") as f:
+        f.write("# Kit test\n")
+    commit("Add README")
+    kit = calkit.kits.read(png_path)
+    assert kit is not None
+    commit_sha = kit.manifest.source.commit_sha
+    assert commit_sha is not None
+    assert calkit.kits.get_source_owner_and_name(kit.manifest) == (
+        "someone",
+        "kit-test",
+    )
+    # Unrelated commits since don't count, and its record tag is found
+    tag_name = calkit.kits.record(kit.kit, kit.manifest)
+    changes = calkit.kits.get_source_changes(kit)
+    assert changes == calkit.kits.SourceChanges(
+        commit_sha=commit_sha,
+        commit_found=True,
+        in_history=True,
+        n_commits_since=1,
+        tag_name=tag_name,
+        artifact_changed=False,
+    )
+    # A fix that hasn't been rerun is a change to the pipeline
+    with open("scripts/make.py", "a") as f:
+        f.write("# Fixed\n")
+    fix_sha = commit("Fix script")
+    changes = calkit.kits.get_source_changes(kit)
+    assert changes is not None
+    assert changes.artifact_changed is False
+    assert changes.artifact_commits == []
+    assert changes.pipeline_commits == [(fix_sha, "Fix script")]
+    # Remaking the file shows which commit changed it
+    with open("data/raw.csv", "a") as f:
+        f.write("5000,1\n")
+    subprocess.check_call([sys.executable, "-m", "calkit", "run"])
+    rerun_sha = commit("Rerun with new data")
+    changes = calkit.kits.get_source_changes(kit)
+    assert changes is not None
+    assert changes.n_commits_since == 3
+    assert changes.artifact_changed is True
+    assert changes.artifact_commits == [(rerun_sha, "Rerun with new data")]
+    assert changes.pipeline_commits == [
+        (fix_sha, "Fix script"),
+        (rerun_sha, "Rerun with new data"),
+    ]
+    # On a branch without its commit, it's not in the history
+    first_sha = git.Repo().git.rev_list("--max-parents=0", "HEAD")
+    subprocess.check_call(["git", "checkout", "-q", "-b", "old", first_sha])
+    changes = calkit.kits.get_source_changes(kit)
+    assert changes is not None
+    assert not changes.in_history
+    assert changes.artifact_changed is None
+    subprocess.check_call(["git", "checkout", "-q", "-"])
+    # A copy of the project without its commit says it's missing
+    missing = calkit.kits.EmbeddedKit(
+        kit=kit.kit,
+        artifact=kit.artifact,
+        manifest=kit.manifest.model_copy(
+            update={
+                "source": kit.manifest.source.model_copy(
+                    update={"commit_sha": "0" * 40}
+                )
+            }
+        ),
+    )
+    changes = calkit.kits.get_source_changes(missing)
+    assert changes == calkit.kits.SourceChanges(
+        commit_sha="0" * 40, commit_found=False
+    )
+    # Anywhere else isn't its source
+    other_dir = tmp_path_factory.mktemp("other")
+    assert calkit.kits.get_source_changes(kit, str(other_dir)) is None
+    subprocess.check_call(["git", "init", "-q"], cwd=other_dir)
+    subprocess.check_call(
+        ["git", "commit", "-q", "--allow-empty", "-m", "x"],
+        cwd=other_dir,
+        env=os.environ
+        | {
+            "GIT_AUTHOR_NAME": "x",
+            "GIT_AUTHOR_EMAIL": "x@x",
+            "GIT_COMMITTER_NAME": "x",
+            "GIT_COMMITTER_EMAIL": "x@x",
+        },
+    )
+    assert calkit.kits.get_source_changes(kit, str(other_dir)) is None
+    assert calkit.kits.get_source_changes(missing, str(other_dir)) is None

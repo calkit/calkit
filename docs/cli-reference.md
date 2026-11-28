@@ -3086,13 +3086,14 @@ Options:
 
 Share figures and documents that carry what made them (calkits).
 
-| Command                                | Description                                                                                        |
-| -------------------------------------- | -------------------------------------------------------------------------------------------------- |
-| [`bundle`](#subcommand-kit-bundle)     | Write a copy of a figure or document with a calkit embedded.                                       |
-| [`unbundle`](#subcommand-kit-unbundle) | Unbundle the calkit embedded in a file into a project.                                             |
-| [`run`](#subcommand-kit-run)           | Unbundle the calkit embedded in a file, rerun its pipeline, and check the file comes out the same. |
-| [`open`](#subcommand-kit-open)         | Open the project a file's calkit came from.                                                        |
-| [`list`](#subcommand-kit-list)         | List the calkits bundled from this project, newest first.                                          |
+| Command                                | Description                                                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| [`bundle`](#subcommand-kit-bundle)     | Write a copy of a figure or document with a calkit embedded.                                                              |
+| [`unbundle`](#subcommand-kit-unbundle) | Unbundle the calkit embedded in a file into a project.                                                                    |
+| [`run`](#subcommand-kit-run)           | Unbundle the calkit embedded in a file, rerun its pipeline, and check the file comes out the same.                        |
+| [`open`](#subcommand-kit-open)         | Open the project a file's calkit came from.                                                                               |
+| [`describe`](#subcommand-kit-describe) | Describe a file's calkit: what made it, whether it changed, and, in the project it came from, what's changed there since. |
+| [`list`](#subcommand-kit-list)         | List the calkits bundled from this project, newest first.                                                                 |
 
 <a id="subcommand-kit-bundle"></a>
 
@@ -3181,7 +3182,7 @@ Options:
 
 Open the project a file's calkit came from.
 
-Unbundles the calkit, unless that's been done already, and opens it in the default editor, or with '--hub', opens the original project on the hub at the commit the calkit came from.
+Unbundles the calkit, unless that's been done already, and opens it in the default editor. With '--source', opens the original project instead, finding it on this machine or cloning it, and says what's changed there since, e.g., whether the file has been remade. With '--hub', opens the original project on the hub at the commit the calkit came from.
 
 Usage:
 
@@ -3198,10 +3199,38 @@ Arguments:
 
 Options:
 
-| Option         | Type    | Required | Default | Description                                              |
-| -------------- | ------- | -------- | ------- | -------------------------------------------------------- |
-| `--hub`        | boolean | no       | False   | Open its project on the hub, at the commit it came from. |
-| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default.           |
+| Option         | Type    | Required | Default | Description                                                                                                 |
+| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `--hub`        | boolean | no       | False   | Open its project on the hub, at the commit it came from.                                                    |
+| `--source`     | boolean | no       | False   | Open the project it came from, on this machine or cloned into ~/calkit, and say what's changed there since. |
+| `--yes`, `-y`  | boolean | no       | False   | With --source, clone it without asking if it isn't here.                                                    |
+| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default.                                                              |
+
+<a id="subcommand-kit-describe"></a>
+
+#### `calkit kit describe`
+
+Describe a file's calkit: what made it, whether it changed, and, in the project it came from, what's changed there since.
+
+Same as 'calkit describe PATH'.
+
+Usage:
+
+```text
+calkit kit describe [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description     |
+| -------- | ---- | -------- | ------- | --------------- |
+| `path`   | str  | yes      |         | Path of a file. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description    |
+| -------- | ------- | -------- | ------- | -------------- |
+| `--json` | boolean | no       | False   | Print as JSON. |
 
 <a id="subcommand-kit-list"></a>
 

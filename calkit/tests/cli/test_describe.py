@@ -285,9 +285,13 @@ def test_describe_artifact(kit_project, tmp_path):
         assert "origin not defined for data/raw.csv" in res.stdout
         assert "  - data/raw.csv" in res.stdout
         assert "    scripts/make.py" in res.stdout
+        # Here in its source project, it says what's changed since
+        assert "From this project, at HEAD" in res.stdout
+        assert "No newer figures/fig.png here" in res.stdout
     res = runner.invoke(app, ["describe", kit_path, "--json"])
     assert res.exit_code == 0, res.stdout
     info = json.loads(res.stdout)
+    assert info["this_project"]["commit_found"] is True
     assert info["artifact_unchanged"] is True
     assert info["matches_pipeline"] is True
     assert info["calkit"]["artifact"]["stage"] == "make"

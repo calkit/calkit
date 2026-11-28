@@ -77,6 +77,14 @@ which inputs have no recorded origin (see [provenance](provenance.md)),
 and lists every file, marking those left out.
 Add `--json` for tools.
 
+In the project the calkit came from,
+`calkit describe` also says how far behind its commit is,
+whether the file has been remade since, and in which commits,
+and which commits changed its pipeline,
+e.g., to check whether something a colleague spotted in a shared figure
+is already fixed.
+`calkit kit describe` does the same.
+
 `calkit describe` works on files in a project without a calkit too,
 saying what kind of artifact it is, which stage makes it,
 whether that's up to date, and where its inputs came from.
@@ -111,6 +119,10 @@ calkit kit open plot.calkit.png
 
 This opens the project in that same folder in your editor,
 unbundling the calkit first if needed.
+With `--source`, it opens the project the calkit came from instead,
+wherever it is on your machine,
+or cloned into `~/calkit` if you have access to it,
+and says what's changed there since.
 With `--hub`, it opens the original project on the hub instead,
 at the commit the calkit came from.
 

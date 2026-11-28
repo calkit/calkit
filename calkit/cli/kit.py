@@ -434,6 +434,24 @@ def open_(
             help="Open its project on the hub, at the commit it came from.",
         ),
     ] = False,
+    source: Annotated[
+        bool,
+        typer.Option(
+            "--source",
+            help=(
+                "Open the project it came from, on this machine or cloned "
+                "into ~/calkit, and say what's changed there since."
+            ),
+        ),
+    ] = False,
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="With --source, clone it without asking if it isn't here.",
+        ),
+    ] = False,
     with_editor: Annotated[
         str | None,
         typer.Option(
@@ -446,13 +464,86 @@ def open_(
     """Open the project a file's calkit came from.
 
     Unbundles the calkit, unless that's been done already, and opens it in
-    the default editor, or with '--hub', opens the original project on the
-    hub at the commit the calkit came from.
+    the default editor. With '--source', opens the original project instead,
+    finding it on this machine or cloning it, and says what's changed there
+    since, e.g., whether the file has been remade. With '--hub', opens the
+    original project on the hub at the commit the calkit came from.
     """
+    import subprocess
+    from urllib.parse import urlparse
+
     import calkit.kits
+    from calkit.cli.describe import echo_source_changes
     from calkit.cli.open_ import open_project
 
+    def echo_changes(checkout: str) -> None:
+        changes = calkit.kits.get_source_changes(kit, checkout)
+        # The commit may only be on its remote, kept there by its record tag
+        if changes is not None and not changes.commit_found:
+            subprocess.run(
+                ["git", "fetch", "--tags", "--quiet"],
+                cwd=checkout,
+                check=False,
+            )
+            changes = calkit.kits.get_source_changes(kit, checkout)
+        if changes is None:
+            warn(f"{checkout} doesn't have the commit calkit came from")
+        else:
+            echo_source_changes(changes, kit.manifest.artifact.path)
+
     kit = read_kit(path)
+    if hub and source:
+        raise_error("Use --hub or --source, not both")
+    if source:
+        owner, name = calkit.kits.get_source_owner_and_name(kit.manifest)
+        if not re.fullmatch(r"[\w.-]+", name) or (
+            owner and not re.fullmatch(r"[\w.-]+", owner)
+        ):
+            raise_error("Calkit names no project to find")
+        found = calkit.get_project_checkouts(name, owner=owner, warn=warn)
+        if not found:
+            if not owner:
+                raise_error(f"{name} isn't on this machine")
+            hub_url = None
+            if kit.manifest.source.hub_url:
+                parsed = urlparse(kit.manifest.source.hub_url)
+                if parsed.scheme in ("http", "https") and parsed.netloc:
+                    hub_url = f"{parsed.scheme}://{parsed.netloc}"
+            open_project(
+                project=f"{owner}/{name}",
+                file_path=None,
+                checkout=None,
+                with_editor=with_editor,
+                yes=yes,
+                hub=hub_url,
+            )
+            echo_changes(os.path.join(os.path.expanduser("~"), "calkit", name))
+            return
+        # Prefer the one in ~/calkit, then a main checkout over a worktree
+        default_path = os.path.realpath(
+            os.path.join(os.path.expanduser("~"), "calkit", name)
+        )
+        checkout = sorted(
+            found,
+            key=lambda p: (
+                p != default_path,
+                not os.path.isdir(os.path.join(p, ".git")),
+                p,
+            ),
+        )[0]
+        echo_changes(checkout)
+        artifact_path = kit.manifest.artifact.path
+        open_project(
+            project=name,
+            file_path=artifact_path
+            if os.path.isfile(os.path.join(checkout, artifact_path))
+            else None,
+            checkout=checkout,
+            with_editor=with_editor,
+            yes=False,
+            hub=None,
+        )
+        return
     if hub:
         url = calkit.kits.get_hub_file_url(kit.manifest)
         if url is None:
@@ -476,6 +567,23 @@ def open_(
         yes=False,
         hub=None,
     )
+
+
+@kit_app.command(name="describe")
+def describe(
+    path: Annotated[str, typer.Argument(help="Path of a file.")],
+    as_json: Annotated[
+        bool, typer.Option("--json", help="Print as JSON.")
+    ] = False,
+) -> None:
+    """Describe a file's calkit: what made it, whether it changed, and,
+    in the project it came from, what's changed there since.
+
+    Same as 'calkit describe PATH'.
+    """
+    from calkit.cli.describe import describe_artifact
+
+    describe_artifact(path=path, as_json=as_json)
 
 
 @kit_app.command(name="list")

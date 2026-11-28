@@ -278,7 +278,7 @@ DVC handles:
 | `calkit kit bundle <file>`      | Copy of a figure or document with a calkit embedded     |
 | `calkit kit unbundle <file>`    | Unbundle a file's calkit into a project                 |
 | `calkit kit run <file>`         | Unbundle, rerun, and check the file comes out the same  |
-| `calkit kit open <file>`        | Open a calkit's project in an editor, or `--hub`        |
+| `calkit kit open <file>`        | Open a calkit's project; `--source` for the original    |
 | `calkit kit list`               | List calkits bundled from this project                  |
 
 ## `calkit xr`: The fastest path to a reproducible stage
@@ -386,3 +386,7 @@ Ask before bundling one from a private project, since everything in the
 calkit goes with the file; `calkit describe <copy>` lists what's in it.
 When given a file from someone else, run `calkit describe` on it before
 reasoning about where it came from.
+When someone comments on a shared copy, e.g., that a figure looks off, run
+`calkit describe <copy>` in the project it came from: it says whether the
+file has been remade since, and which commits changed its pipeline, so you
+can tell whether it's already fixed.

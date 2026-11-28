@@ -1250,6 +1250,174 @@ def get_hub_file_url(manifest: Manifest) -> str | None:
     return f"{manifest.source.hub_url}/files?{urlencode(query)}"
 
 
+def get_source_owner_and_name(manifest: Manifest) -> tuple[str, str]:
+    """Get the owner and name of the project a calkit came from, from its
+    hub URL or Git remotes, with an empty owner if neither names one.
+    """
+    from urllib.parse import urlparse
+
+    if manifest.source.hub_url:
+        parts = urlparse(manifest.source.hub_url).path.strip("/").split("/")
+        if len(parts) == 2 and all(parts):
+            return parts[0], parts[1]
+    for url in manifest.source.git_remotes.values():
+        # Only from a URL with a host, not a local path
+        match = re.fullmatch(
+            r"(?:[a-z+]+://[^/]+/|[\w.-]+@[\w.-]+:)([\w.-]+)/([\w.-]+?)"
+            r"(?:\.git)?/?",
+            url,
+        )
+        if match:
+            return match.group(1), match.group(2)
+    return "", manifest.source.name or ""
+
+
+@dataclasses.dataclass
+class SourceChanges:
+    """What changed in a calkit's source project since it was made, as
+    seen from a checkout of it.
+    """
+
+    commit_sha: str
+    commit_found: bool
+    in_history: bool = False
+    n_commits_since: int = 0
+    tag_name: str | None = None
+    artifact_changed: bool | None = None
+    # Commits, as short SHA and subject, oldest first
+    artifact_commits: list[tuple[str, str]] = dataclasses.field(
+        default_factory=list
+    )
+    pipeline_commits: list[tuple[str, str]] = dataclasses.field(
+        default_factory=list
+    )
+
+
+def get_source_changes(
+    kit: EmbeddedKit, wdir: str = "."
+) -> SourceChanges | None:
+    """Get what changed in the project at ``wdir`` since a calkit was made
+    from it, or None if it isn't the calkit's source project.
+
+    Changes are relative to ``HEAD``: commits that changed the artifact's
+    recorded output, and commits to the files its pipeline uses, so a fix
+    that hasn't been rerun yet shows too.
+    """
+    import git
+
+    import calkit
+
+    manifest = kit.manifest
+    commit_sha = manifest.source.commit_sha
+    if not commit_sha or not re.fullmatch(r"[0-9a-f]{40}", commit_sha):
+        return None
+    try:
+        repo = git.Repo(wdir, search_parent_directories=True)
+    except (git.InvalidGitRepositoryError, git.NoSuchPathError):
+        return None
+    if not repo.head.is_valid():
+        return None
+    try:
+        repo.git.cat_file("-e", f"{commit_sha}^{{commit}}")
+    except git.GitCommandError:
+        # It may just not be fetched yet, if this is a copy of the project
+        local_remotes = {scrub_url(r.url) for r in repo.remotes}
+        if local_remotes & set(manifest.source.git_remotes.values()):
+            return SourceChanges(commit_sha=commit_sha, commit_found=False)
+        return None
+    prefix = Path(
+        os.path.relpath(os.path.abspath(wdir), repo.working_tree_dir)
+    ).as_posix()
+
+    def get_repo_path(p: str) -> str:
+        return p if prefix == "." else posixpath.join(prefix, p)
+
+    def get_artifact_md5(rev: str) -> str | None:
+        try:
+            lock = calkit.ryaml.load(
+                repo.git.show(f"{rev}:{get_repo_path('dvc.lock')}")
+            )
+        except git.GitCommandError:
+            return None
+        try:
+            dvc_yaml = calkit.ryaml.load(
+                repo.git.show(f"{rev}:{get_repo_path('dvc.yaml')}")
+            )
+        except git.GitCommandError:
+            dvc_yaml = {}
+        for io_ in get_stage_io(lock or {}, dvc_yaml or {}).values():
+            for out_path, out_md5 in io_["outs"]:
+                if out_path == manifest.artifact.path:
+                    return out_md5
+        return None
+
+    def get_commits(*args: str) -> list[tuple[str, str]]:
+        out = repo.git.log(
+            "--reverse", "--format=%H%x00%s", f"{commit_sha}..HEAD", *args
+        )
+        return [
+            (sha[:7], subject)
+            for sha, _, subject in (
+                line.partition("\x00") for line in out.splitlines()
+            )
+        ]
+
+    changes = SourceChanges(
+        commit_sha=commit_sha,
+        commit_found=True,
+        in_history=repo.is_ancestor(repo.commit(commit_sha), repo.head.commit),
+        n_commits_since=int(
+            repo.git.rev_list("--count", f"{commit_sha}..HEAD")
+        ),
+    )
+    # The record tag ends with the calkit's hash
+    kit_sha7 = hashlib.sha256(kit.kit).hexdigest()[:7]
+    for tag_name in repo.git.tag(
+        "--list", "--points-at", commit_sha, f"{RECORD_TAG_PREFIX}*-{kit_sha7}"
+    ).splitlines():
+        changes.tag_name = tag_name
+    # What the pipeline recorded for the artifact, here and in the calkit
+    kit_md5 = None
+    for io_ in get_stage_io(
+        read_project_yaml(kit.kit, "dvc.lock"),
+        read_project_yaml(kit.kit, "dvc.yaml"),
+    ).values():
+        for out_path, out_md5 in io_["outs"]:
+            if out_path == manifest.artifact.path:
+                kit_md5 = out_md5
+    if kit_md5 is None:
+        kit_md5 = hashlib.md5(kit.artifact).hexdigest()
+    head_md5 = get_artifact_md5("HEAD")
+    if head_md5 is not None:
+        changes.artifact_changed = head_md5 != kit_md5
+    if changes.n_commits_since == 0:
+        return changes
+    # Commits where the recorded output changed, checking at most the last
+    # 200 that touched dvc.lock
+    md5 = kit_md5
+    for short_sha, subject in get_commits(
+        "-n", "200", "--", get_repo_path("dvc.lock")
+    ):
+        commit_md5 = get_artifact_md5(short_sha)
+        if commit_md5 is not None and commit_md5 != md5:
+            changes.artifact_commits.append((short_sha, subject))
+            md5 = commit_md5
+    # Commits to the files the pipeline uses, besides project config that
+    # every stage shares
+    pipeline_paths = [
+        get_repo_path(f.path)
+        for f in manifest.files
+        if f.storage == "git"
+        and f.path != manifest.artifact.path
+        and f.path not in ("calkit.yaml", "dvc.yaml", "dvc.lock")
+        and not f.path.startswith((".calkit/", ".dvc/"))
+        and posixpath.basename(f.path) != ".gitignore"
+    ]
+    if pipeline_paths:
+        changes.pipeline_commits = get_commits("--", *pipeline_paths)
+    return changes
+
+
 def get_record_tag_name(kit: bytes, manifest: Manifest, date: str) -> str:
     """Get the name of the tag recording a calkit, e.g.,
     ``kit/figures/plot.png/2026-11-27-1a2b3c4``, which is unique to the

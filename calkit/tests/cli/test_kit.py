@@ -4,6 +4,7 @@ import hashlib
 import io
 import os
 import subprocess
+import urllib.parse
 import zipfile
 
 import git
@@ -290,3 +291,34 @@ def test_unbundle_run_open(kit_project, tmp_path, monkeypatch):
     # Its name, from whoever made it, only names a folder here
     assert f"Unbundled into {home / 'calkit' / 'kits' / 'evil-'}" in res.stdout
     assert "differs from the shared file" in res.stdout + str(res.stderr)
+    # Its source project is found on this machine, saying what's changed
+    # there since, or cloned if it isn't here
+    project_dir = os.path.realpath(".")
+    monkeypatch.setattr(
+        "calkit.get_project_checkouts",
+        lambda name, owner="", warn=None: (
+            {project_dir: owner}
+            if (owner, name) == ("someone", "kit-test")
+            else {}
+        ),
+    )
+    res = runner.invoke(app, ["kit", "open", kit_path, "--source"])
+    assert res.exit_code == 0, res.stdout
+    assert "From this project, at HEAD" in res.stdout
+    assert "No newer figures/fig.png here" in res.stdout
+    assert opened[-1]["checkout"] == project_dir
+    assert opened[-1]["file_path"] == "figures/fig.png"
+    res = runner.invoke(app, ["kit", "describe", kit_path])
+    assert res.exit_code == 0, res.stdout
+    assert "From this project, at HEAD" in res.stdout
+    monkeypatch.setattr(
+        "calkit.get_project_checkouts", lambda *args, **kwargs: {}
+    )
+    res = runner.invoke(app, ["kit", "open", kit_path, "--source", "--yes"])
+    assert res.exit_code == 0, res.stdout
+    assert opened[-1]["project"] == "someone/kit-test"
+    assert opened[-1]["yes"]
+    hub = urllib.parse.urlparse(calkit.hub.get_hub_url())
+    assert opened[-1]["hub"] == f"{hub.scheme}://{hub.netloc}"
+    res = runner.invoke(app, ["kit", "open", kit_path, "--source", "--hub"])
+    assert res.exit_code != 0

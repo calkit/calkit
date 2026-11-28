@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import os
 import pathlib
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
 import calkit
-from calkit.cli import DefaultCommandGroup, echo_json, raise_error
+from calkit.cli import DefaultCommandGroup, echo_json, raise_error, warn
+
+if TYPE_CHECKING:
+    import calkit.kits
 
 
 class DescribeGroup(DefaultCommandGroup):
@@ -281,6 +284,63 @@ def describe_schema(
     typer.echo(f"Wrote schema to {output}")
 
 
+def echo_source_changes(
+    changes: calkit.kits.SourceChanges, artifact_path: str
+) -> None:
+    """Print what changed in a calkit's source project since it was made."""
+
+    def echo_commits(commits: list[tuple[str, str]]) -> None:
+        for short_sha, subject in commits[-10:]:
+            typer.echo(f"  {short_sha} {subject}")
+        if len(commits) > 10:
+            typer.echo(f"  and {len(commits) - 10} earlier")
+
+    if not changes.commit_found:
+        typer.echo(
+            typer.style(
+                f"From this project, but commit {changes.commit_sha[:7]} "
+                "isn't here; fetch it with 'git fetch --tags'",
+                fg="yellow",
+            )
+        )
+        return
+    where = (
+        f"{changes.n_commits_since} commit"
+        + "s" * (changes.n_commits_since != 1)
+        + " behind HEAD"
+        if changes.in_history
+        else "not in this branch's history"
+    )
+    if changes.in_history and changes.n_commits_since == 0:
+        where = "at HEAD"
+    typer.echo(
+        f"From this project, {where}"
+        + (f" (tag {changes.tag_name})" if changes.tag_name else "")
+    )
+    if changes.artifact_changed:
+        typer.echo(
+            typer.style(
+                f"Newer {artifact_path} here"
+                + (", from:" if changes.artifact_commits else ""),
+                fg="yellow",
+            )
+        )
+        echo_commits(changes.artifact_commits)
+    elif changes.artifact_changed is False:
+        typer.echo(f"No newer {artifact_path} here")
+    if changes.pipeline_commits:
+        n = len(changes.pipeline_commits)
+        typer.echo(
+            typer.style(
+                f"Pipeline changed since, in {n} commit"
+                + "s" * (n != 1)
+                + ":",
+                fg="yellow",
+            )
+        )
+        echo_commits(changes.pipeline_commits)
+
+
 @describe_app.command(name="artifact")
 def describe_artifact(
     path: Annotated[str, typer.Argument(help="Path of a file.")],
@@ -296,6 +356,8 @@ def describe_artifact(
     another project; otherwise, describes it as part of this project.
     'calkit describe PATH' is short for this.
     """
+    import dataclasses
+
     import calkit.kits
     import calkit.pipeline
     import calkit.provenance
@@ -312,6 +374,13 @@ def describe_artifact(
     # A file with a calkit is described by it, wherever it is
     if kit is not None:
         manifest = kit.manifest
+        # In its source project, what's changed there since matters most,
+        # e.g., whether something someone pointed out is already fixed
+        try:
+            changes = calkit.kits.get_source_changes(kit)
+        except Exception as e:
+            warn(f"Couldn't compare with this project: {e}", err=as_json)
+            changes = None
         if as_json:
             echo_json(
                 {
@@ -322,6 +391,9 @@ def describe_artifact(
                     "calkit_size": len(kit.kit),
                     "artifact_unchanged": kit.artifact_unchanged,
                     "matches_pipeline": kit.matches_pipeline,
+                    "this_project": None
+                    if changes is None
+                    else dataclasses.asdict(changes),
                 }
             )
             return
@@ -363,6 +435,8 @@ def describe_artifact(
             typer.echo(typer.style(gap.message, fg="yellow"))
         if not manifest.provenance_gaps:
             typer.echo("Provenance defined for all inputs")
+        if changes is not None:
+            echo_source_changes(changes, manifest.artifact.path)
         left_out = [f for f in manifest.files if not f.included]
         typer.echo(
             f"Calkit: {len(kit.kit) / 1e3:.0f} KB, "

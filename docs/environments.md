@@ -1326,11 +1326,11 @@ environments:
 ```
 
 Every TeX Live environment has pdfLaTeX, LuaLaTeX, latexmk, BibTeX,
-makeindex, and latexdiff, for `calkit latex diff`,
+makeindex, and latexdiff, for `calkit doc diff`,
 and one whose document uses biblatex gets Biber with it.
 List any other [TeX Live packages](https://ctan.org/) the document uses
 under `packages`, or leave them out:
-when `calkit latex build -e tex` or a LaTeX stage finds the document
+when `calkit doc build` with `-e tex` or a LaTeX stage finds the document
 needs a package the environment doesn't have,
 Calkit adds it to the environment's lock for you,
 so `packages` stays as you wrote it.
@@ -1363,7 +1363,7 @@ To download TeX Live's base packages ahead of time, e.g., when setting up a
 computer or a container image, run:
 
 ```sh
-calkit latex warm-cache
+calkit doc latex warm-cache
 ```
 
 Calkit's dev container image comes with them, so a new container's first
@@ -1372,7 +1372,7 @@ build is quicker.
 The environment only sees fonts from TeX Live packages, not those
 installed on your computer, so a document builds the same everywhere.
 
-A LaTeX stage or `calkit latex build` set up for XeLaTeX, e.g., with
+A LaTeX stage or `calkit doc build` set up for XeLaTeX, e.g., with
 `-xelatex` in `latexmk_args` or `$pdf_mode = 5` in its latexmkrc, adds
 `xetex` to the lock.
 One that makes its PDF through DVI with dvipdfmx or dvips gets that too,

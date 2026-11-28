@@ -446,7 +446,8 @@ def export_gimp(
 
 @export_app.command(
     name="pptx",
-    help="Export slides from a PowerPoint file to PDF or PNG.",
+    help="Export slides from a PowerPoint file to PDF or PNG.\n\n"
+    "`calkit doc build` exports a whole deck to a PDF with this.",
 )
 def export_pptx(
     source: Annotated[

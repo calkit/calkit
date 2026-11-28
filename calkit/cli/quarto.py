@@ -75,9 +75,9 @@ def render(
     Quarto has to come from the environment, so every machine renders with
     the same version, unless the project lists 'quarto' as a requirement or
     the environment is `_system`, i.e., this machine.
-    The values the document shows with the 'ckvalue' shortcode are checked
-    first, and the Quarto extension that reads them from their results
-    files is written.
+    The values the document shows with the 'ckvalue' shortcode, or its
+    alias 'ckval', are checked first, and the Quarto extension that reads
+    them from their results files is written.
     """
     import calkit
     import calkit.environments

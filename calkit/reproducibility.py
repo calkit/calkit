@@ -653,8 +653,8 @@ def _mask_markdown_zones(source: str) -> str:
     masked = re.sub(r"``[^\n]+?``|`[^`\n]+`", _mask_match, masked)
     # A Markdown stage writes each value between markers, so it's computed
     masked = re.sub(
-        rf"<!--\s*({VALUE_COMMAND_PATTERN}|ckrefval)\b.*?-->"
-        r".*?<!--\s*/\1\s*-->",
+        rf"<!--\s*(?:(?P<value>{VALUE_COMMAND_PATTERN})|ckrefval)\b.*?-->"
+        rf".*?<!--\s*/(?(value){VALUE_COMMAND_PATTERN}|ckrefval)\s*-->",
         _mask_match,
         masked,
         flags=re.DOTALL,

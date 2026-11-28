@@ -1608,7 +1608,7 @@ def test_value_blocks_and_brackets(tmp_path, monkeypatch, command):
         "<!-- ckvalue[.4f] metrics rms -->0<!-- /ckvalue -->\n"
     ).replace("ckvalue", command)
     with pytest.raises(
-        MarkdownParseError, match="ckvalue results.json rms .4f"
+        MarkdownParseError, match=f"'{command} results.json rms .4f'"
     ):
         extract_values(bracketed, "x.md", results=results)
     # ...and updating values moves it after the key, as named if the
@@ -1705,6 +1705,20 @@ def test_compact_value_markers(tmp_path, monkeypatch, command):
         ".calkit/notebooks/outputs/fit.ipynb/values.json"
     )
     assert "-->0.031<!--" in set_values(nb_text, "README.md")[0]
+    # A value's marker may close with either name, but a reference's can't
+    other = next(c for c in VALUE_COMMANDS if c != command)
+    mixed = f"N <!-- {command} metrics n -->?<!-- /{other} -->\n"
+    assert set_values(mixed, "README.md", results=declared)[0] == (
+        f"N <!-- {command} metrics n -->401<!-- /{other} -->\n"
+    )
+    assert not extract_values(
+        f"<!-- ckrefval a b -->x<!-- /{command} -->\n", "README.md"
+    )
+    # Errors name the command as written
+    with pytest.raises(MarkdownParseError, match=f"'{command}' takes at most"):
+        extract_values(
+            f"<!-- {command} a b c d -->x<!-- /{command} -->\n", "README.md"
+        )
 
     # Source, key and format read like a Python call: positional in that
     # order, or by name, or positional then keyword

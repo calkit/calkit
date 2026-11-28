@@ -533,6 +533,16 @@ def test_include_figure(tmp_dir):
     )
 
 
+def test_style_defines_value_commands() -> None:
+    import re
+
+    import calkit.resources
+
+    style = calkit.resources.read_text("latex", calkit.latex.STYLE_FNAME)
+    for command in VALUE_COMMANDS:
+        assert re.search(rf"\\newcommand\\{command}(?![A-Za-z])", style)
+
+
 @pytest.mark.parametrize("command", VALUE_COMMANDS)
 def test_load_package(tmp_dir, command):
     os.makedirs("paper")

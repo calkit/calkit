@@ -101,6 +101,11 @@ def test_values(tmp_path, monkeypatch, command):
         "doc.qmd",
     ) == ["run_a"]
     for text, match in [
+        # Named as written
+        (
+            f"{{{{< {command} results.json rms ' .2f' >}}}}",
+            f"'{command}' can't",
+        ),
         ("{{< ckvalue results.json rms ' .2f' >}}", "can't format"),
         ("{{< ckvalue results.json rms 8.2f >}}", "can't format"),
         ("{{< ckvalue results.json rms '{x:.2f}' >}}", "can't format"),
@@ -274,6 +279,11 @@ def test_shortcode_matches_python(tmp_path, monkeypatch, command):
     assert [line.split(": ", 1)[1].strip() for line in got[:-1]] == expected
     # A value that can't be read shows as missing
     assert got[-1].strip() == "Gone: ??"
+
+
+def test_shortcodes_cover_value_commands() -> None:
+    for command in VALUE_COMMANDS:
+        assert f'["{command}"]' in calkit.quarto.SHORTCODE_LUA
 
 
 def test_refvals(tmp_path):

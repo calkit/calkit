@@ -596,6 +596,9 @@ def test_find_unattributed_numbers_markdown(command: str):
         "It drifts by 0.003 ± 0.001 per step.\n"
         "The RMS is <!-- ckvalue r.json rms .4f -->0.2933<!-- /ckvalue -->.\n"
     ).replace("ckvalue", command)
+    # Closed with the other name, it's still a value
+    other = next(c for c in VALUE_COMMANDS if c != command)
+    md += f"Its SD is <!-- {command} r.json sd -->0.0412<!-- /{other} -->.\n"
     assert values(md) == [
         ("0.97", 4, False),
         ("12.5%", 4, False),

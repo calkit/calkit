@@ -91,7 +91,7 @@ export function citationsIn(line: string): CitationMatch[] {
     }
     const [command, name, options, first, second] = match;
     // CK_VALUE_RE captures its whole command, since it has an alias
-    const kind = name.startsWith("ckval") ? "value" : name;
+    const kind = name === "ckvalue" || name === "ckval" ? "value" : name;
     const citation: Citation = command.startsWith("\\ck")
       ? {
           // \ckinclude inputs any TeX, like a plain \input

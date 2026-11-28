@@ -2,6 +2,7 @@
 
 import base64
 import gzip
+import itertools
 import json
 import os
 import re
@@ -932,20 +933,25 @@ def test_build_as_stage(
     )
     # Each document builds as its own stage does, from wherever, with what
     # the editor adds after the stage's options, including a Docker stage's,
-    # which builds in its container rather than natively
-    for doc, env, cwd, latexmk_args in [
-        ("paper/main.tex", "tex", root, ["-lualatex", "-file-line-error"]),
-        ("thesis/main.tex", "tex2", "thesis", ["-file-line-error"]),
-        ("slides/main.tex", "dock", root, ["-file-line-error"]),
-    ]:
+    # which builds in its container rather than natively, with or without
+    # --as-stage
+    for (doc, env, cwd, latexmk_args), as_stage in itertools.product(
+        [
+            ("paper/main.tex", "tex", root, ["-lualatex", "-file-line-error"]),
+            ("thesis/main.tex", "tex2", "thesis", ["-file-line-error"]),
+            ("slides/main.tex", "dock", root, ["-file-line-error"]),
+        ],
+        [True, False],
+    ):
         monkeypatch.chdir(root)
         runs.clear()
         cli_latex.build(
             os.path.join(root, doc),
-            as_stage=True,
+            as_stage=as_stage,
             verbose=True,
             latexmk_args=["-file-line-error"],
         )
+        assert os.path.samefile(os.getcwd(), root), doc
         cmd, ran_env, ran_cwd = runs[0]
         assert ran_env == env, doc
         assert os.path.samefile(ran_cwd, os.path.join(root, cwd)), doc
@@ -958,14 +964,29 @@ def test_build_as_stage(
         assert ("Stages 'paper' and 'paper-arxiv' all build" in out) == (
             doc == "paper/main.tex"
         )
-    # A document no stage builds gets the default TeX, since there's more
-    # than one TeX Live environment, or else the only one
+    # Naming the environment builds as told, where it's run from
     monkeypatch.chdir(os.path.join(root, "paper"))
     runs.clear()
-    cli_latex.build("../x.tex", as_stage=True)
-    assert runs[0][1] is None
-    assert runs[0][0][-1] == "x.tex"
-    assert os.path.samefile(runs[0][2], root)
+    cli_latex.build("main.tex", environment="tex2")
+    assert runs[0][1] == "tex2"
+    assert runs[0][0][-1] == "main.tex"
+    assert "-lualatex" not in runs[0][0]
+    assert os.path.samefile(runs[0][2], os.path.join(root, "paper"))
+    # A document no stage builds gets the default TeX, since there's more
+    # than one TeX Live environment, or else the only one, or without
+    # --as-stage, the default TeX, as outside a project
+    for doc, as_stage in [
+        ("../x.tex", True),
+        ("../x.tex", False),
+        ("../../elsewhere/a.tex", False),
+    ]:
+        runs.clear()
+        cli_latex.build(doc, as_stage=as_stage)
+        assert runs[0][1] is None, doc
+        assert os.path.basename(runs[0][0][-1]) == os.path.basename(doc), doc
+        if as_stage:
+            assert os.path.samefile(runs[0][2], root)
+        monkeypatch.chdir(os.path.join(root, "paper"))
     info = calkit.load_calkit_info(wdir=root)
     del info["environments"]["tex2"]
     calkit.save_calkit_info(info, wdir=root)

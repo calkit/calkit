@@ -1976,6 +1976,22 @@ class QuartoStage(Stage):
         return self.target_path.endswith(".ipynb")
 
     @property
+    def allows_machine_quarto(self) -> bool:
+        """Whether Quarto from this machine is expected, as it is if the
+        stage requires it, or the project does, which
+        ``calkit quarto render`` reads itself.
+        """
+        import calkit.environments
+
+        requirements = [
+            r.model_dump(exclude_none=True) if isinstance(r, BaseModel) else r
+            for r in self.requirements
+        ]
+        return calkit.environments.is_app_required(
+            "quarto", {}, stage={"requirements": requirements}
+        )
+
+    @property
     def executes_notebook(self) -> bool:
         """Whether rendering executes the notebook, writing its outputs back
         into it. Execution enabled in its metadata instead isn't seen, so
@@ -2072,8 +2088,6 @@ class QuartoStage(Stage):
 
     @property
     def dvc_cmd(self) -> str:
-        import calkit.environments
-
         # Dispatched to a job scheduler or another machine as other stages
         # are, with 'calkit quarto render' taking the place of the inner
         # xenv; with no runtime to activate there, it renders as is
@@ -2087,15 +2101,7 @@ class QuartoStage(Stage):
         elif prefix:
             environment = "_system"
         args = ["-e", environment, "--no-check"]
-        # Quarto from the machine is expected if the stage requires it, as it
-        # is if the project does, which the command reads itself
-        requirements = [
-            r.model_dump(exclude_none=True) if isinstance(r, BaseModel) else r
-            for r in self.requirements
-        ]
-        if calkit.environments.is_app_required(
-            "quarto", {}, stage={"requirements": requirements}
-        ):
+        if self.allows_machine_quarto:
             args.append("--allow-machine-quarto")
         args.append(self.target_path)
         if self.to is not None:

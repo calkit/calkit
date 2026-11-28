@@ -5,7 +5,7 @@ import os
 import posixpath
 import re
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -1061,6 +1061,7 @@ def get_gated_stages(
     requirements_by_stage: dict[str, list] | None = None,
     blocked_by: dict[str, set[str]] | None = None,
     failed_environments: dict[str, str] | None = None,
+    checked: dict[str, str | None] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -1068,8 +1069,10 @@ def get_gated_stages(
     here: a requirement of the stage or of an environment it uses isn't
     met where it would run, a switch it uses picks nothing here, or a
     machine it locks isn't this one. The second is stages that can't run
-    because something is wrong, e.g., their machine can't be reached. Both
-    are skipped, keeping their outputs, but only the first is expected.
+    because something is wrong, e.g., their machine can't be reached, or
+    an app an environment they use is built with, e.g., Conda, isn't
+    installed. Both are skipped, keeping their outputs, but only the first
+    is expected.
 
     Requirements are only checked here, never prompted for or installed,
     and anything the checks print goes to stderr, keeping stdout for,
@@ -1081,12 +1084,18 @@ def get_gated_stages(
     Each stage skipped only for requirements this machine doesn't meet,
     i.e., not also for a machine lock, is added to ``requirements_by_stage``
     with its own and its environments' requirements, which may be offered
-    later, e.g., by ``calkit run`` for a stage it would run. Each of those,
-    and each stage skipped for an output a skipped stage hasn't made, that
-    needs such an output is added to ``blocked_by`` with those stages.
+    later, e.g., by ``calkit run`` for a stage it would run, as is each
+    skipped for an app its environments are built with, with those apps.
+    Each of those, and each stage skipped for an output a skipped stage
+    hasn't made, that needs such an output is added to ``blocked_by`` with
+    those stages.
 
     ``failed_environments`` maps environments that failed their check to a
     reason, which a stage using one is skipped for, as for a requirement.
+
+    ``checked`` keeps what each requirement checked here came to, as for
+    :func:`calkit.check_requirements`, so another call with it, e.g., to
+    retry reaching machines, doesn't check or print them again.
     """
     import contextlib
     import json
@@ -1111,7 +1120,10 @@ def get_gated_stages(
     errors: dict[str, str] = {}
     cache: dict[str, tuple[str | None, bool]] = {}
     # Each requirement checked here, so one many stages share is checked once
-    checked: dict[str, str | None] = {}
+    if checked is None:
+        checked = {}
+    # Which apply wherever a stage runs here
+    project_requirements = calkit.get_requirements(ck_info)
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
     # The apps that can export each kind
@@ -1429,6 +1441,31 @@ def get_gated_stages(
                     f"; giving environment '{local_machines[0]}' a 'host' "
                     "would let its stages run there from here over SSH"
                 )
+        # The apps its environments are built with, e.g., Conda, are offered
+        # like declared requirements, but lacking one is something wrong
+        # rather than the project saying the stage can't run here, so it's
+        # the reason only if nothing else, e.g., a lock, is
+        implied_reason = None
+        if reason is None or unmet is not None:
+            implied = envs_mod.get_implied_requirements(
+                stage, resolved, project_requirements
+            )
+            implied_apps = list(dict.fromkeys(implied.values()))
+            if implied_apps and (
+                check(
+                    ["requirements", None, implied_apps],
+                    lambda: requirements_problem(implied_apps, None, {}),
+                )[0]
+                is not None
+            ):
+                unmet = (unmet or []) + implied_apps
+                implied_reason = "; ".join(
+                    f"environment '{env_name}' is built with {app}, which "
+                    "isn't installed"
+                    for env_name, app in implied.items()
+                    if checked.get(calkit.get_requirement_key(app))
+                )
+                implied_reason += f"; {REQUIREMENTS_FIX_HINT}"
         # Locks are checked for a stage that only lacks requirements too,
         # since meeting them wouldn't let it run if a lock rules it out
         wants_unmet = unmet is not None and requirements_by_stage is not None
@@ -1448,6 +1485,8 @@ def get_gated_stages(
                     if reason is None:
                         reason, is_error = lock_reason, lock_is_error
                     break
+        if reason is None and implied_reason is not None:
+            reason, is_error = implied_reason, True
         if unmet is not None and requirements_by_stage is not None:
             requirements_by_stage[name] = unmet
         if reason is not None:
@@ -1480,7 +1519,9 @@ def get_gated_stages(
     # What each is waiting on, once every skipped stage is known, including
     # those offered their requirements, which need these too
     if blocked_by is not None:
-        offered = {n for n in requirements_by_stage or {} if n in gated}
+        offered = {
+            n for n in requirements_by_stage or {} if n in gated or n in errors
+        }
         for name in waiting | offered:
             upstream_names = {
                 u
@@ -2365,6 +2406,65 @@ def get_live_lock_stages(lock_stages: dict, yaml_stages: dict) -> dict:
             continue
         live[stage_name] = lock_stage
     return live
+
+
+def find_document_stages(
+    path: str,
+    kinds: Collection[str] = ("latex", "quarto", "jupyter-notebook"),
+    inside: bool = False,
+) -> tuple[str | None, dict, list[tuple[str, Stage]]]:
+    """Find the project a document is in and the stages that build it.
+
+    A stage builds a document if it's the stage's source, e.g., a latex
+    stage's ``target_path``, under its ``wdir``, or for a latex stage, the
+    PDF it writes. With ``inside``, ``path`` is a folder, and a stage builds
+    it if its source is in it. Paths are compared as real paths, so ``path``
+    can be relative to anywhere in the project, and the project is the
+    nearest folder at or above it with a ``calkit.yaml``.
+
+    Returns the project folder, or ``None`` outside one, its info, and each
+    stage's name and model, in the order they're defined.
+    """
+    from calkit.models.pipeline import JupyterNotebookStage, QuartoStage
+
+    models: dict[str, tuple[type[Stage], str]] = {
+        "latex": (LatexStage, "target_path"),
+        "quarto": (QuartoStage, "target_path"),
+        "jupyter-notebook": (JupyterNotebookStage, "notebook_path"),
+    }
+    real_path = os.path.realpath(path)
+    target = os.path.normcase(real_path)
+    project_dir = real_path if inside else os.path.dirname(real_path)
+    while not os.path.isfile(os.path.join(project_dir, "calkit.yaml")):
+        parent = os.path.dirname(project_dir)
+        if parent == project_dir:
+            return None, {}, []
+        project_dir = parent
+    ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    found: list[tuple[str, Stage]] = []
+    for name, stage in stages.items() if isinstance(stages, dict) else []:
+        kind = stage.get("kind") if isinstance(stage, dict) else None
+        if kind not in kinds or kind not in models:
+            continue
+        model, field = models[kind]
+        try:
+            s = model.model_validate(stage | {"name": name})
+        except ValueError:
+            continue
+        paths = [getattr(s, field)]
+        if isinstance(s, LatexStage) and not inside:
+            paths.append(s.pdf_path)
+        for p in paths:
+            built = os.path.normcase(
+                os.path.realpath(os.path.join(project_dir, s.wdir or "", p))
+            )
+            if built == target or (
+                inside and built.startswith(target.rstrip(os.sep) + os.sep)
+            ):
+                found.append((name, s))
+                break
+    return project_dir, ck_info, found
 
 
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:

@@ -9,17 +9,24 @@ so there's no need to copy/paste them in, like you might in
 like Microsoft Word.
 
 For one-off compilation,
-Calkit offers a `calkit latex build` command,
-which will invoke `latexmk`, optionally using one of the
+Calkit offers a `calkit doc build` command,
+which for a `.tex` file will invoke `latexmk`, optionally using one of the
 project's [environments](environments.md):
 
 ```sh
-calkit latex build paper/main.tex --env tex
+calkit doc build paper/main.tex --env tex
 ```
 
-Without `--env`, `latexmk` is called directly
+Without `--env`, a document a pipeline stage builds is built as that
+stage does, i.e., in its environment and with its options.
+Otherwise, `latexmk` is called directly
 if it's installed on the system, and in Calkit's TinyTeX/TeXlive
 container if it isn't.
+
+<!-- TODO: needs human review -->
+
+`calkit doc build` picks the tool from the document's path, as described
+in [documents and presentations](documents/index.md).
 
 ## Adding a document to the pipeline
 
@@ -106,7 +113,7 @@ Calkit's LaTeX image includes the packages used by common journal classes
 and most papers,
 which makes it a fraction of the size of a full TeX Live distribution.
 If a document uses a package the image doesn't include,
-`calkit latex build` will install it the first time it's needed.
+`calkit doc build` will install it the first time it's needed.
 Installed packages are kept in the project in `.calkit/local/texmf`,
 which is ignored by Git,
 so they don't need to be installed again on the next build.
@@ -117,8 +124,8 @@ Packages are only installed automatically in a
 [TeX Live environment](environments.md#tex-live),
 whose lock gains them,
 or a Docker environment built from Calkit's image.
-With no environment specified,
-`calkit latex build` uses the LaTeX installed on your machine if there is
+With no environment specified and no stage building the document,
+`calkit doc build` uses the LaTeX installed on your machine if there is
 one, and otherwise a TeX Live environment Calkit keeps for the machine
 in `~/.calkit/texlive`.
 For other images or a LaTeX distribution installed on your machine,
@@ -179,7 +186,7 @@ A figure, table, or included file can be named without its extension,
 as with `\includegraphics` and `\input`.
 Paths outside the project, or with `..` in them, aren't read.
 Before running or checking the pipeline, and before each
-`calkit latex build`, Calkit copies what a document that loads the package
+`calkit doc build`, Calkit copies what a document that loads the package
 includes into a `_calkit` folder beside it, writes the values it uses to
 `_calkit/values.tex`, and puts `calkit.sty` next to the document.
 A document that doesn't load it gets none of these.
@@ -492,11 +499,11 @@ the PDF beside it.
 ### Comparing on demand
 
 To compare against a revision that isn't in the pipeline's `diffs`,
-`calkit latex diff` runs a comparison on demand,
+`calkit doc diff` runs a comparison on demand,
 and with no `--to` option specified, the comparison is the working copy:
 
 ```sh
-calkit latex diff pubs/paper-1/main.tex --from main
+calkit doc diff pubs/paper-1/main.tex --from main
 # .calkit/local/latex-diffs/main..working/pubs/paper-1/main.pdf
 ```
 
@@ -523,11 +530,11 @@ does the same from the editor, and opens the result.
 For projects to be as inclusive as possible towards collaborators who
 prefer Microsoft Word, Calkit has the ability to export Word documents
 from LaTeX using Word's PDF converter to make them look as faithful as
-possible using the `calkit latex to-docx` command.
+possible using the `calkit doc to-docx` command.
 After they've been marked up and commented on,
 those contributions can be merged back into the .tex source,
 including comments,
-with `calkit latex merge-docx`.
+with `calkit doc merge-docx`.
 
 See [this tutorial](tutorials/latex-word.md) for more.
 
@@ -577,18 +584,18 @@ thread, so newer attributes survive older tools.
 
 ### From the command line
 
-`calkit latex comments` reads and edits threads in place.
+`calkit doc latex comments` reads and edits threads in place.
 To list a document's threads, including those in files it inputs,
 in the order they appear:
 
 ```sh
-calkit latex comments list paper/main.tex --unresolved
+calkit doc latex comments list paper/main.tex --unresolved
 ```
 
 To start a thread above the paragraph at a line, about some of its text:
 
 ```sh
-calkit latex comments add paper/intro.tex --line 12 \
+calkit doc latex comments add paper/intro.tex --line 12 \
   --highlight "the wake recovers" -m "How quickly?"
 ```
 
@@ -597,8 +604,8 @@ and `delete` take with `--id`.
 They also take `--line` with the number of any line in the thread:
 
 ```sh
-calkit latex comments reply paper/intro.tex --id 3f9a2c1b -m "Within 3D."
-calkit latex comments resolve paper/intro.tex --id 3f9a2c1b
+calkit doc latex comments reply paper/intro.tex --id 3f9a2c1b -m "Within 3D."
+calkit doc latex comments resolve paper/intro.tex --id 3f9a2c1b
 ```
 
 Authors default to Git's `user.name` and `user.email`.

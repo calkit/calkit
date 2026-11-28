@@ -2876,6 +2876,8 @@ def test_new_release_kit(kit_project):
         ["--kit", "."],
         ["--kit", "--pipeline", "figures/fig.svg"],
         ["--kit", "data/raw.csv"],
+        ["--kit", "figures"],
+        ["--kit", "figures/missing.png"],
     ]:
         res = runner.invoke(
             app,

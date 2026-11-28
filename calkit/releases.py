@@ -875,6 +875,7 @@ def prune_for_stage(
         needed.add(n + ".dvc")
         parent = posixpath.dirname(n)
         while parent:
+            needed.add(parent + ".dvc")
             needed.add(posixpath.join(parent, ".gitignore"))
             parent = posixpath.dirname(parent)
     # The cache is shared across the whole project, so keep only the objects

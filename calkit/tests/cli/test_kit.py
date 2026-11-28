@@ -134,8 +134,25 @@ def test_create(kit_project, monkeypatch, tmp_path):
         app, ["kit", "create", "figures/fig.svg", "--to-clipboard"]
     )
     assert res.exit_code == 0, res.stdout
+    assert "Couldn't record" not in res.stdout + str(res.stderr)
+    assert "Recorded as tag kit/figures/fig.svg/" in res.stdout
     assert copied == ["fig.calkit.svg"]
     assert "Copied fig.calkit.svg to clipboard" in res.stdout
+    # Modifying the DVC-tracked artifact itself marks it uncommitted so
+    # --force leaves it unrecorded
+    with open("figures/fig.png", "ab") as f:
+        f.write(b"x")
+    res = runner.invoke(
+        app, ["kit", "create", "figures/fig.png", "-o", "mod.png", "--force"]
+    )
+    assert res.exit_code == 0, res.stdout
+    mod_kit = calkit.kits.read("mod.png")
+    assert mod_kit is not None
+    assert "figures/fig.png" in mod_kit.manifest.source.uncommitted_paths
+    assert "isn't recorded" in res.stdout + str(res.stderr)
+    subprocess.check_call(
+        ["dvc", "checkout", "-q", "--force", "figures/fig.png"]
+    )
     # Only what a stage makes can carry a calkit
     res = runner.invoke(app, ["kit", "create", "scripts/make.py"])
     assert res.exit_code != 0
@@ -148,6 +165,18 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
     small_path = str(tmp_path / "small.png")
     calkit.kits.write_copy(
         "figures/fig.png", small_path, up_to_date=True, max_size=1000
+    )
+    # Inputs left out can be pulled from the project's DVC remote when
+    # rerunning, even though the expanded repo has no Git origin
+    dvc_remote = tmp_path / "dvc-remote"
+    dvc_remote.mkdir()
+    subprocess.check_call(
+        ["dvc", "remote", "add", "-d", "local", str(dvc_remote)]
+    )
+    subprocess.check_call(["dvc", "push", "-q", "data/raw.csv"])
+    pullable_path = str(tmp_path / "pullable.png")
+    calkit.kits.write_copy(
+        "figures/fig.png", pullable_path, up_to_date=True, max_size=1000
     )
     os.chdir(tmp_path)
     # Expanding defaults to the project's name, and says what's missing
@@ -189,12 +218,34 @@ def test_expand_run_open(kit_project, tmp_path, monkeypatch):
     res = runner.invoke(app, ["kit", "run", kit_path, "rerun", "--yes"])
     assert res.exit_code == 0, res.stdout
     assert "Reproduced figures/fig.png: identical" in res.stdout
+    # Without --yes on a non-TTY, it previews stages and stops before pulling
+    res = runner.invoke(app, ["kit", "run", pullable_path, "no-yes"])
+    assert res.exit_code != 0
+    assert "Rerun with --yes" in res.stdout + str(res.stderr)
+    assert not os.path.exists("no-yes/data/raw.csv")
+    # With --yes, it pulls the missing input via DVC and reproduces the file
+    res = runner.invoke(
+        app, ["kit", "run", pullable_path, "rerun-pulled", "--yes"]
+    )
+    assert res.exit_code == 0, res.stdout
+    assert "Reproduced figures/fig.png: identical" in res.stdout
     # It can't without inputs that weren't included and can't be pulled
     res = runner.invoke(
         app, ["kit", "run", small_path, "rerun-small", "--yes"]
     )
     assert res.exit_code != 0
     assert "Missing inputs: data/raw.csv" in res.stdout + str(res.stderr)
+    # Tampering with the shared artifact's bytes is caught on rerun even if
+    # the calkit itself still matches the pipeline
+    with open(kit_path, "rb") as f:
+        kit_bytes = f.read()
+    with open("tampered.png", "wb") as f:
+        f.write(kit_bytes[:16] + b"\x00\x00\x01\x00" + kit_bytes[20:])
+    res = runner.invoke(
+        app, ["kit", "run", "tampered.png", "rerun-tampered", "--yes"]
+    )
+    assert res.exit_code != 0
+    assert "differs from the shared file" in res.stdout + str(res.stderr)
     # A file that comes out different from the shared one is reported
     kit = calkit.kits.read(kit_path)
     assert kit is not None

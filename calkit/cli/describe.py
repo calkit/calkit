@@ -302,7 +302,7 @@ def describe_artifact(
 
     if not os.path.isfile(path):
         # Probably a mistyped subcommand, if it doesn't look like a path
-        if "/" not in path and "." not in path:
+        if "/" not in path and "\\" not in path and "." not in path:
             raise_error(f"No such command or file: {path}")
         raise_error(f"{path} doesn't exist")
     try:
@@ -379,7 +379,10 @@ def describe_artifact(
             )
         return
     # Otherwise it has to be part of this project
-    rel_path = pathlib.Path(os.path.relpath(path)).as_posix()
+    try:
+        rel_path = pathlib.Path(os.path.relpath(path)).as_posix()
+    except ValueError:
+        rel_path = "../"
     if not os.path.isfile("calkit.yaml") or rel_path.startswith("../"):
         raise_error(f"{path} has no calkit and isn't in a Calkit project here")
     ck_info = calkit.load_calkit_info()

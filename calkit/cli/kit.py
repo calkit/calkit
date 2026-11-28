@@ -136,6 +136,12 @@ def create(
     )
     if status.errors:
         raise_error("Pipeline checks failed: " + "; ".join(status.errors))
+    if status.failed_environment_checks and not force:
+        raise_error(
+            "Pipeline environment checks failed for: "
+            + ", ".join(status.failed_environment_checks)
+            + "; fix them or use --force"
+        )
     if status.is_stale and not force:
         raise_error(
             "Out of date: "
@@ -241,7 +247,7 @@ def expand(
     if left_out:
         typer.echo(
             f"Left out of calkit: {get_n_files_text(len(left_out))}; "
-            "'calkit pull' fetches them if you have access, "
+            "'calkit pull --no-git' fetches them if you have access, "
             "'calkit run' remakes outputs"
         )
 
@@ -273,7 +279,9 @@ def run(
     import subprocess
     import sys
 
+    import calkit
     import calkit.kits
+    import calkit.pipeline
     from calkit.core import is_tty
 
     if not os.path.isfile(path):
@@ -285,12 +293,59 @@ def run(
     except ValueError as e:
         raise_error(str(e))
     typer.echo(f"Expanded into {dest_dir}")
-    # Rerunning needs every input that no stage makes
+    if not kit.artifact_unchanged:
+        warn(
+            f"{kit.manifest.artifact.path} was modified since calkit was "
+            "created"
+        )
+    # The pipeline is someone else's code, so say what it runs before pulling
+    # or running anything. Compile from calkit.yaml as 'calkit run' does,
+    # rather than trusting dvc.yaml to match it.
+    ck_info = (
+        calkit.load_calkit_info(wdir=dest_dir)
+        if os.path.isfile(os.path.join(dest_dir, "calkit.yaml"))
+        else {}
+    )
+    if (ck_info.get("pipeline") or {}).get("stages"):
+        try:
+            dvc_stages = calkit.pipeline.to_dvc(
+                ck_info=ck_info,
+                wdir=dest_dir,
+                write=False,
+                manage_gitignore=False,
+            )
+        except Exception as e:
+            raise_error(f"Can't read calkit's pipeline: {e}")
+    elif os.path.isfile(os.path.join(dest_dir, "dvc.yaml")):
+        with open(os.path.join(dest_dir, "dvc.yaml")) as f:
+            dvc_stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+    else:
+        raise_error("Calkit has no pipeline to run")
+    envs = ck_info.get("environments") or {}
+    if envs:
+        typer.echo("Environments: " + ", ".join(envs))
+    typer.echo("Stages to run:")
+    for name, stage in dvc_stages.items():
+        cmd = stage.get("cmd") or (stage.get("do") or {}).get("cmd")
+        typer.echo(f"  {name}: {cmd}")
     missing = calkit.kits.get_missing_inputs(kit, dest_dir)
+    if missing:
+        typer.echo(
+            f"Inputs to pull ({get_n_files_text(len(missing))}): "
+            + ", ".join(missing)
+        )
+    if not yes:
+        if not is_tty():
+            raise_error("Rerun with --yes to run these")
+        if not typer.confirm("Run them?", default=False):
+            raise typer.Exit(1)
+    # Rerunning needs every input that no stage makes
     if missing:
         typer.echo(f"Pulling {get_n_files_text(len(missing))} left out")
         subprocess.run(
-            [sys.executable, "-m", "calkit", "pull"], cwd=dest_dir, check=False
+            [sys.executable, "-m", "calkit", "pull", "--no-git"],
+            cwd=dest_dir,
+            check=False,
         )
         missing = calkit.kits.get_missing_inputs(kit, dest_dir)
         if missing:
@@ -299,18 +354,6 @@ def run(
                 + ", ".join(missing)
                 + "; pull them, or create calkit with a larger --max-size"
             )
-    # The pipeline is someone else's code, so say what it runs first
-    with open(os.path.join(dest_dir, "dvc.yaml")) as f:
-        dvc_stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
-    typer.echo("Stages to run:")
-    for name, stage in dvc_stages.items():
-        cmd = stage.get("cmd") or (stage.get("do") or {}).get("cmd")
-        typer.echo(f"  {name}: {cmd}")
-    if not yes:
-        if not is_tty():
-            raise_error("Rerun with --yes to run these")
-        if not typer.confirm("Run them?", default=False):
-            raise typer.Exit(1)
     typer.echo("Rerunning pipeline")
     res = subprocess.run(
         [sys.executable, "-m", "calkit", "run", "--force"], cwd=dest_dir
@@ -320,7 +363,8 @@ def run(
     artifact_path = os.path.join(dest_dir, kit.manifest.artifact.path)
     with open(artifact_path, "rb") as f:
         sha256 = hashlib.sha256(f.read()).hexdigest()
-    if sha256 != kit.manifest.artifact.sha256:
+    expected_sha256 = hashlib.sha256(kit.artifact).hexdigest()
+    if sha256 != expected_sha256 or sha256 != kit.manifest.artifact.sha256:
         raise_error(
             f"Reran, but {kit.manifest.artifact.path} differs from the "
             "shared file"

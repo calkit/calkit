@@ -4054,6 +4054,8 @@ def new_release(
     if embed_kit and include_pipeline:
         raise_error("Use --kit or --pipeline, not both")
     if embed_kit:
+        if not os.path.isfile(path):
+            raise_error(f"Only a file can carry a calkit: {path}")
         with open(path, "rb") as f:
             try:
                 calkit.kits.get_format(f.read(), path)
@@ -4191,9 +4193,12 @@ def new_release(
                         raise_error(str(e))
             elif embed_kit:
                 typer.echo(f"Embedding calkit in {stored_path_posix}")
-                calkit.kits.write_copy(
-                    path, stored_path, up_to_date=True, ck_info=ck_info
-                )
+                try:
+                    calkit.kits.write_copy(
+                        path, stored_path, up_to_date=True, ck_info=ck_info
+                    )
+                except ValueError as e:
+                    raise_error(str(e))
             else:
                 typer.echo(f"Copying {path} to {stored_path_posix}")
                 shutil.copy2(path, stored_path)
@@ -4258,12 +4263,17 @@ def new_release(
                 raise_error("Single artifact releases must be a single file")
             if embed_kit:
                 typer.echo(f"Embedding calkit in copy in {release_files_dir}")
-                calkit.kits.write_copy(
-                    path,
-                    os.path.join(release_files_dir, os.path.basename(path)),
-                    up_to_date=True,
-                    ck_info=ck_info,
-                )
+                try:
+                    calkit.kits.write_copy(
+                        path,
+                        os.path.join(
+                            release_files_dir, os.path.basename(path)
+                        ),
+                        up_to_date=True,
+                        ck_info=ck_info,
+                    )
+                except ValueError as e:
+                    raise_error(str(e))
             else:
                 typer.echo(f"Copying {path} into {release_files_dir}")
                 shutil.copy2(path, release_files_dir)

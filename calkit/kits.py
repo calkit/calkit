@@ -96,11 +96,12 @@ def is_safe_path(path: str) -> bool:
         or ".git" in [p.lower() for p in parts]
     ):
         return False
-    if path.startswith(".dvc/cache/"):
-        return path.startswith(".dvc/cache/files/md5/") and path.endswith(
+    lower = path.lower()
+    if lower.startswith(".dvc/cache/"):
+        return lower.startswith(".dvc/cache/files/md5/") and lower.endswith(
             ".dir"
         )
-    return path != ".dvc/config.local" and not path.startswith(".dvc/tmp/")
+    return lower != ".dvc/config.local" and not lower.startswith(".dvc/tmp/")
 
 
 def scrub_url(url: str) -> str:
@@ -130,7 +131,11 @@ def scrub_dvc_config(text: str) -> str:
     scrubbed.optionxform = str  # type: ignore[assignment,method-assign]
     for section in config.sections():
         if section == "core":
-            scrubbed[section] = dict(config[section])
+            scrubbed[section] = {
+                k: v
+                for k, v in config[section].items()
+                if not k.lower().endswith("_dir")
+            }
         elif section.startswith("'remote ") and "url" in config[section]:
             scrubbed[section] = {"url": scrub_url(config[section]["url"])}
     buf = io.StringIO()
@@ -166,6 +171,24 @@ def get_stage_io(
     return result
 
 
+def read_zip_bytes(
+    z: zipfile.ZipFile,
+    info: zipfile.ZipInfo,
+    max_size: int,
+    too_big_message: str,
+) -> bytes:
+    """Read a ZIP entry, stopping once it exceeds ``max_size`` even if the
+    header claims it's smaller.
+    """
+    if info.file_size > max_size:
+        raise KitError(too_big_message)
+    with z.open(info) as f:
+        data = f.read(max_size + 1)
+    if len(data) > max_size:
+        raise KitError(too_big_message)
+    return data
+
+
 def read_project_yaml(kit: bytes, name: str) -> dict:
     """Read a YAML file at the root of a calkit's project, e.g., ``dvc.lock``,
     or nothing if it has none.
@@ -177,9 +200,10 @@ def read_project_yaml(kit: bytes, name: str) -> dict:
             info = z.getinfo(PROJECT_DIR + name)
         except KeyError:
             return {}
-        if info.file_size > MAX_MANIFEST_SIZE:
-            raise KitError(f"Calkit's {name} is too big")
-        return calkit.ryaml.load(z.read(info).decode()) or {}
+        data = read_zip_bytes(
+            z, info, MAX_MANIFEST_SIZE, f"Calkit's {name} is too big"
+        )
+        return calkit.ryaml.load(data.decode()) or {}
 
 
 def read_manifest(kit: bytes) -> Manifest:
@@ -187,15 +211,19 @@ def read_manifest(kit: bytes) -> Manifest:
     try:
         with zipfile.ZipFile(io.BytesIO(kit)) as z:
             info = z.getinfo(MANIFEST_NAME)
-            if info.file_size > MAX_MANIFEST_SIZE:
-                raise KitError("Calkit's manifest is too big")
-            manifest_json = json.loads(z.read(info))
+            manifest_bytes = read_zip_bytes(
+                z, info, MAX_MANIFEST_SIZE, "Calkit's manifest is too big"
+            )
     except KitError:
         raise
     except KeyError:
         raise KitError(f"Calkit has no {MANIFEST_NAME}")
     except Exception as e:
         raise KitError(f"Calkit isn't a valid ZIP: {e}")
+    try:
+        manifest_json = json.loads(manifest_bytes)
+    except Exception as e:
+        raise KitError(f"Calkit's manifest isn't valid JSON: {e}")
     version = (
         manifest_json.get("kit_version")
         if isinstance(manifest_json, dict)
@@ -339,12 +367,16 @@ class EmbeddedKit:
             read_project_yaml(self.kit, "dvc.lock"),
             read_project_yaml(self.kit, "dvc.yaml"),
         )
-        for out_path, out_md5 in stage_io.get(
-            self.manifest.artifact.stage, {}
-        ).get("outs", []):
-            if out_path == self.manifest.artifact.path:
-                md5 = hashlib.md5(self.artifact).hexdigest()
-                return out_md5 == md5
+        stage = self.manifest.artifact.stage
+        for name, io_ in stage_io.items():
+            if name != stage and name.split("@")[0] != stage:
+                continue
+            for out_path, out_md5 in io_.get("outs", []):
+                if out_path == self.manifest.artifact.path:
+                    if out_md5 is None:
+                        return None
+                    md5 = hashlib.md5(self.artifact).hexdigest()
+                    return out_md5 == md5
         return None
 
 
@@ -463,7 +495,7 @@ def extract_pdf(data: bytes) -> tuple[bytes, bytes] | None:
     # Anything saved after the calkit, e.g., an annotation, is another
     # update, so the PDF without the calkit is the whole file, which no
     # longer matches
-    if data[size:].count(b"%%EOF") != 1:
+    if size < 0 or size > len(data) or data[size:].count(b"%%EOF") != 1:
         return kit, data
     return kit, data[:size]
 
@@ -503,8 +535,11 @@ def extract_markup(data: bytes, fmt: str) -> tuple[bytes, bytes] | None:
     start = data.rfind(open_tag, 0, end)
     if start < 0:
         return None
+    payload = data[start + len(open_tag) : end]
+    if b"<" in payload:
+        return None
     try:
-        kit = base64.b64decode(data[start + len(open_tag) : end])
+        kit = base64.b64decode(payload)
     except ValueError as e:
         raise KitError(f"Calkit's base64 is invalid: {e}")
     return kit, data[:start] + data[end + len(close_tag) :]
@@ -640,9 +675,8 @@ def build(
         copy.deepcopy(ck_info), stage
     )
     lock = calkit.ryaml.load(overrides.get("dvc.lock") or "{}") or {}
-    stage_io = get_stage_io(
-        lock, calkit.ryaml.load(overrides.get("dvc.yaml") or "{}") or {}
-    )
+    dvc_yaml = calkit.ryaml.load(overrides.get("dvc.yaml") or "{}") or {}
+    stage_io = get_stage_io(lock, dvc_yaml)
     output_paths = [p for io_ in stage_io.values() for p, _ in io_["outs"]]
     dep_paths = {p for io_ in stage_io.values() for p, _ in io_["deps"]}
     # Environment specs Calkit generates, e.g., for 'calkit xr', live in
@@ -789,7 +823,7 @@ def build(
                 set(pruned_ck_info.get("environments") or {}),
             ),
         ],
-        "dvc.yaml": [("stages", None, set(stage_io))],
+        "dvc.yaml": [("stages", None, set((dvc_yaml.get("stages") or {})))],
         "dvc.lock": [("stages", None, set(stage_io))],
     }
     for name in overrides:
@@ -818,9 +852,30 @@ def build(
                     changed = True
         if not changed:
             uncommitted.discard(name)
-    for p, content in included.items():
-        recorded_md5 = (dvc_files.get(p) or {}).get("md5")
-        if recorded_md5 and hashlib.md5(content).hexdigest() != recorded_md5:
+    for p in [*paths, path]:
+        dvc_entry = dvc_files.get(p) or {}
+        recorded_md5 = dvc_entry.get("md5")
+        if not recorded_md5:
+            continue
+        if p == path:
+            actual_md5 = hashlib.md5(artifact_data).hexdigest()
+        elif p in included:
+            actual_md5 = hashlib.md5(included[p]).hexdigest()
+        elif os.path.isfile(p):
+            recorded_size = dvc_entry.get("size")
+            if recorded_size is not None and os.path.getsize(p) != int(
+                recorded_size
+            ):
+                uncommitted.add(p)
+                continue
+            digest = hashlib.md5()
+            with open(p, "rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    digest.update(chunk)
+            actual_md5 = digest.hexdigest()
+        else:
+            continue
+        if actual_md5 != recorded_md5:
             uncommitted.add(p)
     remotes = {r.name: scrub_url(r.url) for r in repo.remotes}
     # Where the project would be on its hub, from its owner and name
@@ -989,18 +1044,32 @@ def expand(path: str, dest_dir: str) -> EmbeddedKit:
     ``MAX_EXPANDED_SIZE``. The source project's remotes are added as Git
     remotes prefixed with ``upstream``, so its history can be fetched.
     """
+    import configparser
+
     import git
 
     kit = read(path)
     if kit is None:
         raise KitError(f"{path} has no calkit")
-    if os.path.exists(dest_dir) and os.listdir(dest_dir):
+    if os.path.exists(dest_dir) and (
+        not os.path.isdir(dest_dir) or os.listdir(dest_dir)
+    ):
         raise ValueError(f"{dest_dir} already exists and isn't empty")
     manifest = kit.manifest
     if not is_safe_path(manifest.artifact.path):
         raise KitError(
             f"Calkit's artifact path is unsafe: {manifest.artifact.path}"
         )
+    for name, url in manifest.source.git_remotes.items():
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+            raise KitError(f"Calkit has an unsafe remote name: {name}")
+        if (
+            not url
+            or url.startswith("-")
+            or url.lower().startswith("ext::")
+            or any(c in url for c in "\r\n\0")
+        ):
+            raise KitError(f"Calkit has an unsafe remote URL: {url}")
     included = {f.path: f for f in manifest.files if f.included}
     # Check everything before writing anything
     files: dict[str, tuple[bytes, bool]] = {}
@@ -1014,14 +1083,17 @@ def expand(path: str, dest_dir: str) -> EmbeddedKit:
                 raise KitError(f"Calkit has an unsafe path: {rel_path}")
             if rel_path in files:
                 raise KitError(f"Calkit has {rel_path} twice")
-            total_size += info.file_size
-            if total_size > MAX_EXPANDED_SIZE or (
-                info.file_size > 1_000_000
-                and info.file_size
-                > MAX_COMPRESSION_RATIO * max(info.compress_size, 1)
-            ):
-                raise KitError("Calkit unpacks to too much")
-            content = z.read(info)
+            max_entry = min(
+                MAX_EXPANDED_SIZE - total_size,
+                max(
+                    1_000_000,
+                    MAX_COMPRESSION_RATIO * max(info.compress_size, 1),
+                ),
+            )
+            content = read_zip_bytes(
+                z, info, max_entry, "Calkit unpacks to too much"
+            )
+            total_size += len(content)
             entry = included.get(rel_path)
             if (
                 entry is None
@@ -1030,6 +1102,33 @@ def expand(path: str, dest_dir: str) -> EmbeddedKit:
                 raise KitError(
                     f"Calkit's {rel_path} doesn't match its manifest"
                 )
+            if rel_path.lower() == ".dvc/config":
+                config = configparser.ConfigParser(interpolation=None)
+                try:
+                    config.read_string(content.decode())
+                except Exception as e:
+                    raise KitError(f"Calkit's .dvc/config is invalid: {e}")
+                if config.defaults():
+                    raise KitError(
+                        "Calkit's .dvc/config has disallowed settings"
+                    )
+                for section in config.sections():
+                    if section == "core":
+                        if any(
+                            k.lower().endswith("_dir") for k in config[section]
+                        ):
+                            raise KitError(
+                                "Calkit's .dvc/config has disallowed settings"
+                            )
+                    elif section.startswith("'remote "):
+                        if set(config[section]) - {"url"}:
+                            raise KitError(
+                                "Calkit's .dvc/config has disallowed settings"
+                            )
+                    else:
+                        raise KitError(
+                            "Calkit's .dvc/config has disallowed settings"
+                        )
             files[rel_path] = (
                 content,
                 bool((info.external_attr >> 16) & 0o111),
@@ -1141,9 +1240,12 @@ def get_hub_file_url(manifest: Manifest) -> str | None:
     """Get the URL of a calkit's artifact on its project's hub, at the commit
     it came from, or None if it names no hub.
     """
-    from urllib.parse import urlencode
+    from urllib.parse import urlencode, urlparse
 
     if manifest.source.hub_url is None:
+        return None
+    parsed = urlparse(manifest.source.hub_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
         return None
     query = {"path": manifest.artifact.path}
     if manifest.source.commit_sha:
@@ -1158,9 +1260,13 @@ def get_record_tag_name(kit: bytes, manifest: Manifest, date: str) -> str:
     """
     parts = []
     for part in manifest.artifact.path.split("/"):
-        part = re.sub(r"[^A-Za-z0-9._-]+", "-", part).replace("..", "-")
-        part = part.lstrip(".").removesuffix(".lock") or "-"
-        parts.append(part)
+        part = re.sub(r"[^A-Za-z0-9._-]+", "-", part)
+        while ".." in part:
+            part = part.replace("..", "-")
+        part = part.strip(".")
+        while part.endswith(".lock"):
+            part = part.removesuffix(".lock").rstrip(".")
+        parts.append(part or "-")
     kit_sha256 = hashlib.sha256(kit).hexdigest()
     return f"{RECORD_TAG_PREFIX}{'/'.join(parts)}/{date}-{kit_sha256[:7]}"
 
@@ -1180,6 +1286,11 @@ def record(kit: bytes, manifest: Manifest) -> str:
         raise KitError("Calkit has no commit to record it at")
     created = calkit.utcnow()
     name = get_record_tag_name(kit, manifest, created.date().isoformat())
+    repo = calkit.git.get_repo()
+    if name in repo.tags:
+        if repo.commit(name).hexsha == manifest.source.commit_sha:
+            return name
+        raise KitError(f"Tag {name} already exists at another commit")
     info = {
         "artifact_path": manifest.artifact.path,
         "artifact_sha256": manifest.artifact.sha256,
@@ -1194,9 +1305,7 @@ def record(kit: bytes, manifest: Manifest) -> str:
         + json.dumps(info, indent=2)
         + "\n"
     )
-    calkit.git.get_repo().git.tag(
-        "-a", name, manifest.source.commit_sha, "-m", message
-    )
+    repo.git.tag("-a", name, manifest.source.commit_sha, "-m", message)
     return name
 
 
@@ -1220,16 +1329,16 @@ def get_records() -> list[dict]:
     out = calkit.git.get_repo().git.for_each_ref(
         f"refs/tags/{RECORD_TAG_PREFIX}",
         "--sort=-creatordate",
-        "--format=%(refname:strip=2)%00%(contents)%1e",
+        "--format=%(refname:strip=2)%00%(contents:body)%1e",
     )
     records = []
     for entry in out.split("\x1e"):
-        name, _, contents = entry.strip("\n").partition("\x00")
+        name, _, body = entry.strip("\n").partition("\x00")
         if not name:
             continue
         try:
-            info = json.loads(contents.split("\n", 2)[2])
-        except (IndexError, ValueError):
+            info = json.loads(body)
+        except ValueError:
             continue
         if isinstance(info, dict):
             records.append({"name": name} | info)

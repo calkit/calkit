@@ -384,14 +384,49 @@ def test_untrusted_calkits(tmp_path):
             f.write(calkit.kits.embed_png(png, write_zip(entries)))
         return path
 
-    # Git internals, e.g., hooks or config that run commands, are refused
-    # before anything is written, even if the manifest lists them
-    for evil_path in [".git/hooks/pre-commit", "sub/.GIT/config", "/etc/x"]:
+    # Git internals, e.g., hooks or config that run commands, and DVC local
+    # config in any case are refused before anything is written
+    for evil_path in [
+        ".git/hooks/pre-commit",
+        "sub/.GIT/config",
+        "/etc/x",
+        ".DVC/config.local",
+        ".dvc/Config.Local",
+    ]:
         files = {"run.py": b"print(1)\n", evil_path: b"#!/bin/sh\ntouch x\n"}
         dest = tmp_path / "dest"
         with pytest.raises(calkit.kits.KitError, match="unsafe path"):
             calkit.kits.expand(write_png(files), str(dest))
         assert not dest.exists()
+    # Disallowed .dvc/config settings and unsafe Git remotes are refused
+    for bad_cfg in [
+        b"[cache]\n    dir = /tmp\n",
+        b"[core]\n    site_cache_dir = /tmp\n",
+        b"['remote \"x\"']\n    url = s3://b\n    endpointurl = http://evil\n",
+    ]:
+        dest = tmp_path / "dest-cfg"
+        with pytest.raises(calkit.kits.KitError, match="disallowed settings"):
+            calkit.kits.expand(write_png({".dvc/config": bad_cfg}), str(dest))
+        assert not dest.exists()
+    for bad_remotes, match in [
+        ({"bad name": "https://example.com/a.git"}, "unsafe remote name"),
+        ({"origin": "--upload-pack=sh"}, "unsafe remote URL"),
+        ({"origin": "ext::sh -c id"}, "unsafe remote URL"),
+    ]:
+        bad_manifest = make_manifest({"run.py": b"print(1)\n"})
+        bad_manifest["source"]["git_remotes"] = bad_remotes
+        dest = tmp_path / "dest-remote"
+        with pytest.raises(calkit.kits.KitError, match=match):
+            calkit.kits.expand(
+                write_png({"run.py": b"print(1)\n"}, bad_manifest), str(dest)
+            )
+        assert not dest.exists()
+    # Non-HTTP(S) hub URLs aren't opened
+    bad_hub = calkit.kits.Manifest.model_validate(
+        make_manifest({})
+        | {"source": {"up_to_date": True, "hub_url": "file:///etc/passwd"}}
+    )
+    assert calkit.kits.get_hub_file_url(bad_hub) is None
     # So are files the manifest doesn't list, or that don't match it, or
     # that it lists but are missing
     files = {"run.py": b"print(1)\n"}
@@ -426,6 +461,14 @@ def test_untrusted_calkits(tmp_path):
     )
     with pytest.raises(calkit.kits.KitError, match="no calkit-kit.json"):
         calkit.kits.read(str(no_manifest))
+    bad_json = tmp_path / "bad-json.png"
+    bad_json.write_bytes(
+        calkit.kits.embed_png(
+            png, write_zip({MANIFEST_NAME: (b"{bad", False)})
+        )
+    )
+    with pytest.raises(calkit.kits.KitError, match="valid JSON"):
+        calkit.kits.read(str(bad_json))
     truncated = tmp_path / "truncated.png"
     truncated.write_bytes(png[:20])
     assert calkit.kits.read(str(truncated)) is None
@@ -447,9 +490,41 @@ def test_untrusted_calkits(tmp_path):
         b"inner",
         b"<svg><rect/></svg>",
     )
-    # An HTML page with an inline SVG is HTML
+    # An HTML page with an inline SVG is HTML, and quoting the opening tag
+    # before an unrelated script isn't mistaken for a calkit
     page = b"<html><body><svg><path/></svg><p>Hi</p></body></html>"
     assert calkit.kits.get_format(page, "page.html") == "html"
+    doc_page = (
+        b"<html><body><pre>"
+        + calkit.kits.MARKUP_BLOCKS["html"][0]
+        + b"</pre><script>1</script></body></html>"
+    )
+    assert calkit.kits.extract_markup(doc_page, "html") is None
+    # Iterated stages match their locked outputs in matches_pipeline
+    iter_manifest = make_manifest({})
+    iter_manifest["artifact"]["stage"] = "each"
+    iter_kit = write_zip(
+        {
+            MANIFEST_NAME: (json.dumps(iter_manifest).encode(), False),
+            PROJECT_DIR + "dvc.yaml": (
+                b"stages:\n  each:\n    foreach: [1]\n    do:\n      cmd: echo\n",
+                False,
+            ),
+            PROJECT_DIR + "dvc.lock": (
+                (
+                    "stages:\n  each@1:\n    outs:\n"
+                    f"    - path: fig.png\n      md5: {hashlib.md5(png).hexdigest()}\n"
+                ).encode(),
+                False,
+            ),
+        }
+    )
+    iter_embedded = calkit.kits.EmbeddedKit(
+        kit=iter_kit,
+        artifact=png,
+        manifest=calkit.kits.Manifest.model_validate(iter_manifest),
+    )
+    assert iter_embedded.matches_pipeline is True
     # A PDF saved again after its calkit was added no longer matches, and
     # its calkit can't be replaced without losing that change
     doc = pdfium.PdfDocument.new()
@@ -487,6 +562,21 @@ def test_untrusted_calkits(tmp_path):
     unedited_kit = calkit.kits.read(str(unedited))
     assert unedited_kit is not None
     assert unedited_kit.artifact_unchanged
+    # A negative size in a PDF manifest can't slice from the end
+    neg_manifest = make_manifest({})
+    neg_manifest["artifact"] |= {
+        "path": "paper.pdf",
+        "size": -10,
+        "sha256": hashlib.sha256(pdf).hexdigest(),
+    }
+    neg_kit = write_zip(
+        {MANIFEST_NAME: (json.dumps(neg_manifest).encode(), False)}
+    )
+    neg_pdf = tmp_path / "neg.pdf"
+    neg_pdf.write_bytes(calkit.kits.embed_pdf(pdf, neg_kit))
+    neg_read = calkit.kits.read(str(neg_pdf))
+    assert neg_read is not None
+    assert not neg_read.artifact_unchanged
 
 
 def test_scrub():
@@ -502,6 +592,7 @@ def test_scrub():
     )
     config = (
         "[core]\n    remote = storage\n"
+        "    site_cache_dir = /Users/me/site\n"
         "['remote \"storage\"']\n    url = s3://bucket/x\n"
         "    access_key_id = AKIA\n    secret_access_key = shh\n"
         "['remote \"web\"']\n    url = https://user:pw@host/dvc\n"
@@ -539,7 +630,11 @@ def test_scrub():
 
 
 def test_get_record_tag_name():
-    for path in ["figures/plot.png", ".hidden/a b..c.lock/x:y?.png"]:
+    for path in [
+        "figures/plot.png",
+        ".hidden/a b..c.lock/x:y?.png",
+        "dir./a.lock.lock/fig.png",
+    ]:
         manifest = calkit.kits.Manifest(
             created_with="test",
             artifact=calkit.kits.KitArtifact(

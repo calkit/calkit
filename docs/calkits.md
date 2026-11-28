@@ -90,8 +90,8 @@ This creates a project folder named after the original project,
 with the figure in place, committed to a new Git repo.
 The original project's Git remote is added as `upstream`,
 so its full history can be fetched with `git fetch upstream`.
-`calkit pull` fetches data left out of the calkit, if you have access to the
-original project's storage, and `calkit run` remakes outputs.
+`calkit pull --no-git` fetches data left out of the calkit, if you have
+access to the original project's storage, and `calkit run` remakes outputs.
 
 ```sh
 calkit kit run plot.calkit.png

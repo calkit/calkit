@@ -373,6 +373,8 @@ though the human is considered the author and AI is noted with a `with_ai` field
 
 ## Sharing figures and documents
 
+<!-- TODO: needs human review -->
+
 When a figure, PDF, SVG, or HTML page is going to a person, e.g., pasted into
 a chat or emailed, offer to share a copy made with `calkit kit create <file>`
 rather than the bare file.

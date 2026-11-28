@@ -61,10 +61,15 @@ nav:
   - Apps: apps.md
   - Releasing/archiving projects and artifacts: releases.md
   - Adding compute resources: compute.md
-  - LaTeX documents: latex.md
-  - Quarto documents: quarto.md
-  - MyST documents: myst.md
-  - Overleaf integration: overleaf.md
+  - Documents and presentations:
+      - documents/index.md
+      - LaTeX:
+          - latex.md
+          - overleaf.md
+          - Collaborating through Word: tutorials/latex-word.md
+      - quarto.md
+      - myst.md
+      - Office (Word and Excel): tutorials/office.md
   - Browser extension: browser-ext/index.md
   - Subprojects: subprojects.md
   - Examples: examples.md
@@ -76,11 +81,9 @@ nav:
       - tutorials/openfoam.md
       - tutorials/adding-latex-pub-docker.md
       - tutorials/latex-codespaces.md
-      - tutorials/latex-word.md
       - tutorials/notebook-pipeline.md
       - tutorials/procedures.md
       - tutorials/conda-envs.md
-      - tutorials/office.md
       - tutorials/matlab.md
       - tutorials/github-actions.md
       - tutorials/runnable-readme.md

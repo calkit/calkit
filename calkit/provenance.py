@@ -1917,6 +1917,7 @@ def get_path_provenance(
     import json
 
     import calkit.environments
+    import calkit.environments.inline
     import calkit.export
     import calkit.notebooks
     import calkit.pipeline
@@ -2219,10 +2220,23 @@ def get_path_provenance(
             env_files.add(
                 posixpath.join(posixpath.dirname(spec), ".python-version")
             )
-    for dep in deps:
-        if not isinstance(dep, str):
-            continue
-        dep = posixpath.normpath(posixpath.join(dvc_wdir, dep))
+    dep_paths = [
+        posixpath.normpath(posixpath.join(dvc_wdir, dep))
+        for dep in deps
+        if isinstance(dep, str)
+    ]
+    # A script's own environment: its lock, beside it, and the
+    # .python-version uv picks its interpreter with
+    if calkit.environments.inline.get_stage_script_path(ck_stage or {}):
+        for dep in dep_paths:
+            if (
+                dep.endswith(".lock")
+                and dep.removesuffix(".lock") in dep_paths
+            ):
+                env_files.add(dep)
+            elif posixpath.basename(dep) == ".python-version":
+                env_files.add(dep)
+    for dep in dep_paths:
         # Calkit's own bookkeeping, e.g., environment locks, and the source
         # shown on its own
         if (

@@ -5,6 +5,7 @@
 - [Converting an existing project to a Calkit project](existing-project.md)
 - [Reproducible OpenFOAM simulations](openfoam.md)
 - [LaTeX collaboration with GitHub Codespaces](latex-codespaces.md)
+- [Collaborating on a LaTeX document using Microsoft Word for feedback](latex-word.md)
 - [Jupyter notebook as a DVC pipeline](notebook-pipeline.md)
 - [Keeping track of conda environments](conda-envs.md)
 - [Defining and executing manual procedures](procedures.md)

@@ -66,6 +66,8 @@ def build(
     MyST has to come from the environment, so every machine builds with
     the same version, unless the project lists 'myst' as a requirement or
     the environment is `_system`, i.e., this machine.
+
+    Also available as `calkit doc build`.
     """
     import calkit
     import calkit.environments

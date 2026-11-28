@@ -57,6 +57,7 @@ from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.doc import doc_app
 from calkit.cli.export import export_app
 from calkit.cli.fix import (
     OursOpt,
@@ -115,9 +116,18 @@ app.add_typer(
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
-app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
-app.add_typer(quarto_app, name="quarto", help="Work with Quarto.")
-app.add_typer(myst_app, name="myst", help="Work with MyST.")
+app.add_typer(
+    doc_app,
+    name="doc|document",
+    help="Work with documents.",
+)
+# Kept hidden for existing dvc.yaml stages, scripts, and editor configs;
+# visible under 'calkit doc'
+app.add_typer(
+    latex_app, name="latex|tex", help="Work with LaTeX.", hidden=True
+)
+app.add_typer(quarto_app, name="quarto", help="Work with Quarto.", hidden=True)
+app.add_typer(myst_app, name="myst", help="Work with MyST.", hidden=True)
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
@@ -960,7 +970,10 @@ def get_status(
         # rather than asking DVC a second time
         questions_status = None
         if "questions" in categories and ck_info.get("questions"):
-            from calkit.pipeline import frozen_tainted_stage_names
+            from calkit.pipeline import (
+                frozen_tainted_stage_names,
+                get_downstream_stage_names,
+            )
             from calkit.questions import check_questions
 
             stale_stages = None
@@ -974,9 +987,13 @@ def get_status(
                 and not pipeline_status.errors
                 and not pipeline_status.failed_environment_checks
             ):
-                stale_stages = {
-                    n.split("@")[0] for n in pipeline_status.stale_stage_names
-                }
+                # What reads an out-of-date stage's outputs is rebuilt with it
+                stale_stages = get_downstream_stage_names(
+                    {
+                        n.split("@")[0]
+                        for n in pipeline_status.stale_stage_names
+                    }
+                )
                 try:
                     frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
                 except Exception:

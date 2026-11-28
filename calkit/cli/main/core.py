@@ -57,6 +57,7 @@ from calkit.cli.config import config_app
 from calkit.cli.delete import delete_app
 from calkit.cli.describe import describe_app
 from calkit.cli.dev import dev_app
+from calkit.cli.doc import doc_app
 from calkit.cli.export import export_app
 from calkit.cli.fix import (
     OursOpt,
@@ -114,8 +115,17 @@ app.add_typer(
 app.add_typer(update_app, name="update", help="Update objects.")
 app.add_typer(check_app, name="check", help="Check things.")
 app.add_typer(fix_app, name="fix", help="Fix things.")
-app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
-app.add_typer(quarto_app, name="quarto", help="Work with Quarto.")
+app.add_typer(
+    doc_app,
+    name="doc|document",
+    help="Work with documents.",
+)
+# Kept hidden for existing dvc.yaml stages, scripts, and editor configs;
+# visible under 'calkit doc'
+app.add_typer(
+    latex_app, name="latex|tex", help="Work with LaTeX.", hidden=True
+)
+app.add_typer(quarto_app, name="quarto", help="Work with Quarto.", hidden=True)
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(
@@ -1098,7 +1108,10 @@ def get_status(
         # rather than asking DVC a second time
         questions_status = None
         if "questions" in categories and ck_info.get("questions"):
-            from calkit.pipeline import frozen_tainted_stage_names
+            from calkit.pipeline import (
+                frozen_tainted_stage_names,
+                get_downstream_stage_names,
+            )
             from calkit.questions import check_questions
 
             stale_stages = None
@@ -1112,9 +1125,13 @@ def get_status(
                 and not pipeline_status.errors
                 and not pipeline_status.failed_environment_checks
             ):
-                stale_stages = {
-                    n.split("@")[0] for n in pipeline_status.stale_stage_names
-                }
+                # What reads an out-of-date stage's outputs is rebuilt with it
+                stale_stages = get_downstream_stage_names(
+                    {
+                        n.split("@")[0]
+                        for n in pipeline_status.stale_stage_names
+                    }
+                )
                 try:
                     frozen_stages = frozen_tainted_stage_names(ck_info=ck_info)
                 except Exception:
@@ -4060,6 +4077,7 @@ def run(
                 manual=can_ask,
                 requirements_by_stage=unmet_requirements,
                 blocked_by=blocked_by,
+                checked=gate_checked,
             )
             # A machine that couldn't be reached may only need asking about,
             # e.g., for its host
@@ -4070,6 +4088,7 @@ def run(
                         stage_names=set(errors),
                         system_info=system_info,
                         interactive=True,
+                        checked=gate_checked,
                     )
                 gated |= retried
         except Exception as e:
@@ -4080,8 +4099,11 @@ def run(
             gated.pop(name, None)
             errors.pop(name, None)
             unmet_requirements.pop(name, None)
+        # One that lacks an app may be offered it, and is reported at the
+        # end if it's still skipped
         for stage_name, reason in errors.items():
-            warn(f"Stage '{stage_name}' can't run: {reason}")
+            if stage_name not in unmet_requirements:
+                warn(f"Stage '{stage_name}' can't run: {reason}")
         gate_errors.update(errors)
         gated_stages.update(gated | errors)
 
@@ -4287,6 +4309,9 @@ def run(
         name: calkit.dvc.SKIP_REQUESTED for name in skip
     }
     gate_errors: dict[str, str] = {}
+    # What each requirement the gate checks came to, so it's checked and
+    # said once, however many times the gate runs
+    gate_checked: dict[str, str | None] = {}
     # Those skipped for requirements, with them, which are offered for each
     # one that would run, and those skipped for another's missing output
     unmet_requirements: dict[str, list] = {}
@@ -4606,6 +4631,7 @@ def run(
                     if blocked_by.get(gated_name, set()) & set(gated_stages):
                         continue
                     del gated_stages[gated_name]
+                    gate_errors.pop(gated_name, None)
                     met.append(gated_name)
                     freed = True
             if not met:
@@ -4973,7 +4999,6 @@ def run(
     # A skip is only fine when the project says the stage can't run here and
     # nobody asked for it by name, or for every stage with --strict
     targeted = {t.split("@")[0] for t in targets or []}
-    error_reasons = set(gate_errors.values())
     # Skipped as requested, so not reported with those that can't run here
     skipped_as_asked = [
         addressing
@@ -4985,7 +5010,8 @@ def run(
     for addressing, reason in skipped_stale.items():
         if (
             strict
-            or reason in error_reasons
+            or addressing in gate_errors
+            or addressing.split("@")[0] in gate_errors
             or addressing.split("@")[0] in targeted
         ):
             typer.echo(

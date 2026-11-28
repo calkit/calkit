@@ -163,10 +163,14 @@ and can specify `inputs` and `outputs`.
 The different kinds of stages and their unique attributes are listed below.
 For more details, see `calkit.models.pipeline`.
 
+<!-- TODO: needs human review -->
+
 ### `python-script`
 
 - `script_path`
 - `args` (list, optional)
+- `environment` (optional; without it, the script runs in the environment
+  it [declares itself](../environments.md#scripts-that-declare-their-own))
 
 ### `shell-command`
 
@@ -735,10 +739,11 @@ writes something else too, e.g., a file the instrument saves.
 
 Model class: `PythonScriptStage`
 
-| Kind-specific parameter | Type      | Required | Default | Description                                             |
-| ----------------------- | --------- | -------- | ------- | ------------------------------------------------------- |
-| `script_path`           | str       | yes      |         | Path to the Python script to run.                       |
-| `args`                  | list[str] | no       |         | Arguments passed to the script, each item one argument. |
+| Kind-specific parameter | Type      | Required | Default    | Description                                                                                                                                                                               |
+| ----------------------- | --------- | -------- | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment`           | str       | no       | '\_inline' | Name of the environment in which to run this stage. Omit it to run the script with uv in the environment its '# /// script' block declares (PEP 723), locked in a '.lock' file beside it. |
+| `script_path`           | str       | yes      |            | Path to the Python script to run.                                                                                                                                                         |
+| `args`                  | list[str] | no       |            | Arguments passed to the script, each item one argument.                                                                                                                                   |
 
 ### `quarto`
 

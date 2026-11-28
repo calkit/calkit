@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-27",
+  "date": "2026-11-28",
   "hub_users": 144,
   "hub_projects": 55,
   "hub_projects_worked_on": 20,
@@ -11,11 +11,11 @@
   ],
   "hub_monthly_active_users": 3,
   "hub_monthly_active_signed_in_users": 1,
-  "hub_human_project_visits_last_30_days": 6,
-  "hub_projects_viewed_last_30_days": 7,
+  "hub_human_project_visits_last_30_days": 5,
+  "hub_projects_viewed_last_30_days": 6,
   "github_stars": 62,
   "github_forks": 20,
-  "pypi_downloads_last_month": 5392,
+  "pypi_downloads_last_month": 5333,
   "releases": 369,
   "releases_per_week_last_90_days": 8.9,
   "papers_shipped": 5

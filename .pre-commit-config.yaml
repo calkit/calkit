@@ -12,6 +12,8 @@ repos:
     rev: "v4.4.0"
     hooks:
       - id: check-added-large-files
+        # Lock files are generated, and as big as what they lock
+        exclude: (^|/)uv\.lock$
       - id: check-case-conflict
       - id: check-merge-conflict
         exclude: ^docs/overleaf\.md$

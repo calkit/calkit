@@ -8001,9 +8001,16 @@
           "type": "string"
         },
         "environment": {
-          "description": "Name of the environment in which to run this stage.",
-          "title": "Environment",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Name of the environment in which to run this stage. Omit it to run the script with uv in the environment its '# /// script' block declares (PEP 723), locked in a '.lock' file beside it.",
+          "title": "Environment"
         },
         "frozen": {
           "default": false,
@@ -8203,7 +8210,6 @@
         }
       },
       "required": [
-        "environment",
         "script_path"
       ],
       "title": "PythonScriptStage",

@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "pyyaml>=6.0.4",
+#     "requests>=2.34.2",
+# ]
+# ///
 """Find Calkit projects in the wild, i.e., repos with a calkit.yaml.
 
 Candidates come from GitHub code search, the Calkit hub's public projects,

@@ -2412,7 +2412,7 @@ def find_document_stages(
         except ValueError:
             continue
         paths = [getattr(s, field)]
-        if isinstance(s, LatexStage):
+        if isinstance(s, LatexStage) and not inside:
             paths.append(s.pdf_path)
         for p in paths:
             built = os.path.normcase(

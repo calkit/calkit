@@ -134,7 +134,7 @@ def test_render(tmp_path, monkeypatch):
     ]
 
 
-def test_render_as_stage(
+def test_render_from_stage(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from typer.testing import CliRunner
@@ -170,32 +170,44 @@ def test_render_as_stage(
         "check_call",
         lambda cmd, **kwargs: calls.append((cmd[1:], os.getcwd())),
     )
-    # Rendered as the stage is, from its working directory, wherever it's
-    # run from, with extra arguments after the stage's
-    for cwd, args in [
-        (".", ["pub/index.qmd", "--as-stage"]),
-        ("pub", ["index.qmd", "--as-stage", "--", "--no-cache"]),
+    # Without -e or --to, renders as its stage from its working directory,
+    # under either 'doc quarto' or the hidden top-level 'quarto' alias
+    for cwd, cmd_args in [
+        (".", ["doc", "quarto", "render", "pub/index.qmd"]),
+        ("pub", ["quarto", "render", "index.qmd", "--", "--no-cache"]),
     ]:
         monkeypatch.chdir(tmp_path / cwd)
         calls.clear()
-        result = CliRunner().invoke(app, ["quarto", "render", *args])
+        result = CliRunner().invoke(app, cmd_args)
         assert result.exit_code == 0, result.output
         cmd, ran_in = calls[0]
         assert cmd == ["render", "index.qmd", "--to", "html", "--execute"] + (
-            ["--no-cache"] if "--no-cache" in args else []
+            ["--no-cache"] if "--no-cache" in cmd_args else []
         )
         assert os.path.samefile(ran_in, tmp_path / "pub")
         assert os.path.samefile(os.getcwd(), tmp_path / cwd)
-    # The stage says how, and there has to be one
+    # Explicit -e overrides the stage, and documents without a stage still
+    # require -e
     monkeypatch.chdir(tmp_path)
+    calls.clear()
+    result = CliRunner().invoke(
+        app,
+        [
+            "doc",
+            "quarto",
+            "render",
+            "pub/index.qmd",
+            "-e",
+            "_system",
+            "--allow-machine-quarto",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls[0][0] == ["render", "pub/index.qmd"]
     for args, expected in [
-        (["pub/index.qmd", "--as-stage", "-e", "py"], "from the stage"),
-        (["other.qmd", "--as-stage"], "No quarto stage renders other.qmd"),
-        (
-            [str(tmp_path.parent / "x.qmd"), "--as-stage"],
-            "isn't in a Calkit project",
-        ),
+        (["other.qmd"], "Name the environment"),
+        ([str(tmp_path.parent / "x.qmd")], "isn't in a Calkit project"),
     ]:
-        result = CliRunner().invoke(app, ["quarto", "render", *args])
+        result = CliRunner().invoke(app, ["doc", "quarto", "render", *args])
         assert result.exit_code != 0, args
         assert expected in result.output, (args, result.output)

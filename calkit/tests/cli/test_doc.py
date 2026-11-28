@@ -111,20 +111,48 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         else:
             assert call[0] == "deck.pptx"
             assert call[1] == expected[1]
-    # Help for what's after the path is the tool's command's
+    # Top-level help exposes doc and hides latex/quarto, while doc exposes
+    # both shared verbs and the tool subgroups
+    top_help = click.unstyle(CliRunner().invoke(app, ["--help"]).output)
+    assert "doc|document" in top_help
+    assert "latex|tex" not in top_help
+    assert "quarto" not in top_help
+    doc_help = click.unstyle(CliRunner().invoke(app, ["doc", "--help"]).output)
+    for name in [
+        "build",
+        "diff",
+        "to-docx",
+        "merge-docx",
+        "latex|tex",
+        "quarto",
+    ]:
+        assert name in doc_help
+    # Subgroups under doc work alongside the hidden top-level aliases
+    for subgroup_args, expected_kind in [
+        (["doc", "tex", "build", "paper.tex", "-f"], "latexmk"),
+        (["doc", "quarto", "render", "report.qmd", *quarto], "quarto"),
+    ]:
+        calls.clear()
+        result = CliRunner().invoke(app, subgroup_args)
+        assert result.exit_code == 0, (subgroup_args, result.output)
+        assert calls[0][0] == expected_kind
+    # Help for what's after the path is the tool's command's, with the
+    # document path shown before options and no --as-stage flag
     for args, expected_text in [
         (["doc", "build", "--help"], "Build a document with its tool"),
         (["doc", "build", "paper.tex", "--help"], "--latexmk-arg"),
         (["doc", "build", "report.qmd", "-h"], "--allow-machine-quarto"),
         (["doc", "build", "deck.pptx", "--help"], "--trim"),
         (["doc", "build", "letter.docx", "--help"], "Word document to PDF"),
-        (["doc", "build", "book", "--help"], "--as-stage"),
+        (["doc", "build", "book", "--help"], "--allow-machine-quarto"),
     ]:
         result = CliRunner().invoke(app, args)
         assert result.exit_code == 0, (args, result.output)
         # Rich styles option names in parts where it detects CI
         output = click.unstyle(result.output)
         assert expected_text in output, args
+        assert "build [OPTIONS]" not in output, (args, output)
+        assert "--as-stage" not in output, (args, output)
         # Not pointing to itself
         assert "calkit doc build`" not in output, args
     # Types without a build yet, or unknown, say so
@@ -137,7 +165,7 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         (["doc", "build", "site"], "build not supported for MyST yet"),
         (["doc", "build", "book"], "No quarto stage renders a document in"),
         (["doc", "build", "missing.tex"], "missing.tex doesn't exist"),
-        (["doc", "build", "notes.txt"], "Unknown document type: notes.txt"),
+        (["doc", "build", "notes.txt"], "folder with _quarto.yml"),
         (["doc", "build", "-e", "tex", "paper.tex"], "path before -e"),
     ]:
         result = CliRunner().invoke(app, args)
@@ -171,7 +199,14 @@ def test_build_as_stage(
                         "kind": "quarto",
                         "environment": "_system",
                         "target_path": "index.ipynb",
+                        "to": "html",
                         "args": ["--execute"],
+                    },
+                    "pub-pdf": {
+                        "kind": "quarto",
+                        "environment": "_system",
+                        "target_path": "index.ipynb",
+                        "to": "pdf",
                     },
                     "nb": {
                         "kind": "jupyter-notebook",
@@ -220,14 +255,39 @@ def test_build_as_stage(
             (
                 "quarto",
                 None,
-                ["render", "index.ipynb", "--execute", "--no-cache"],
+                [
+                    "render",
+                    "index.ipynb",
+                    "--to",
+                    "html",
+                    "--execute",
+                    "--no-cache",
+                ],
             ),
         ),
-        (".", ["."], ("quarto", None, ["render", "index.ipynb", "--execute"])),
+        (
+            ".",
+            ["."],
+            (
+                "quarto",
+                None,
+                [
+                    ["render", "index.ipynb", "--to", "html", "--execute"],
+                    ["render", "index.ipynb", "--to", "pdf"],
+                ],
+            ),
+        ),
         (
             "paper",
             ["..", "--no-check"],
-            ("quarto", None, ["render", "index.ipynb", "--execute"]),
+            (
+                "quarto",
+                None,
+                [
+                    ["render", "index.ipynb", "--to", "html", "--execute"],
+                    ["render", "index.ipynb", "--to", "pdf"],
+                ],
+            ),
         ),
         (
             ".",
@@ -239,6 +299,8 @@ def test_build_as_stage(
         calls.clear()
         result = CliRunner().invoke(app, ["doc", "build", *args])
         assert result.exit_code == 0, (args, result.output)
+        # Running a stage from a subdirectory restores the working directory
+        assert os.path.samefile(os.getcwd(), os.path.join(root, cwd)), args
         kind, env, cmd, ran_in = calls[0]
         assert (kind, env) == expected[:2], args
         assert os.path.samefile(ran_in, root), args
@@ -246,6 +308,10 @@ def test_build_as_stage(
             outdirs = [a for a in cmd if a.startswith("-outdir=")]
             assert outdirs == ([expected[2]] if expected[2] else []), args
             assert ("-f" in cmd) == ("-f" in args), args
+        elif isinstance(expected[2], list) and isinstance(
+            expected[2][0], list
+        ):
+            assert [c[2] for c in calls] == expected[2], args
         else:
             assert cmd == expected[2], args
     # A notebook a stage executes is run with the pipeline, and a Quarto
@@ -254,10 +320,7 @@ def test_build_as_stage(
     for args, expected_text in [
         (["analysis.ipynb"], "Stage 'nb' executes analysis.ipynb"),
         (["book"], "No quarto stage renders a document in book"),
-        (
-            ["index.ipynb", "--as-stage", "--to", "pdf"],
-            "format from the stage",
-        ),
+        ([".", "-e", "_system"], "from each stage in a Quarto project"),
     ]:
         result = CliRunner().invoke(app, ["doc", "build", *args])
         assert result.exit_code != 0, args
@@ -371,11 +434,16 @@ def test_review_commands(
     # Help reads no files, so it's there whatever state they're in
     Path("calkit.yaml").write_text("pipeline: [\n")
     for args, expected_text in [
-        (["doc", "to-docx", "paper.tex", "--help"], "Compiled PDF"),
+        (
+            ["doc", "to-docx", "paper.tex", "--help"],
+            "LaTeX .tex file (or compiled PDF)",
+        ),
         (["doc", "merge-docx", "nope.docx", "-h"], "Reviewed .docx"),
     ]:
         result = CliRunner().invoke(app, args)
         assert result.exit_code == 0, (args, result.output)
         output = click.unstyle(result.output)
         assert expected_text in output, args
-        assert "calkit doc " not in output.replace("calkit doc to", "")
+        assert "to-docx [OPTIONS]" not in output, output
+        assert "merge-docx [OPTIONS]" not in output, output
+        assert "`calkit doc " not in output

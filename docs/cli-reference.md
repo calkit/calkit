@@ -50,9 +50,7 @@
 | [`update`](#command-group-update)                | Update objects.                                                                                              |
 | [`check`](#command-group-check)                  | Check things.                                                                                                |
 | [`fix`](#command-group-fix)                      | Fix things.                                                                                                  |
-| [`doc\|document`](#command-group-doc-document)   | Work with documents: LaTeX, Quarto, Word, and PowerPoint.                                                    |
-| [`latex\|tex`](#command-group-latex-tex)         | Work with LaTeX.                                                                                             |
-| [`quarto`](#command-group-quarto)                | Work with Quarto.                                                                                            |
+| [`doc\|document`](#command-group-doc-document)   | Work with documents.                                                                                         |
 | [`overleaf\|ol`](#command-group-overleaf-ol)     | Interact with Overleaf.                                                                                      |
 | [`hub\|cloud`](#command-group-hub-cloud)         | Interact with a Calkit hub.                                                                                  |
 | [`scheduler\|sch`](#command-group-scheduler-sch) | Work with a job scheduler (SLURM or PBS).                                                                    |
@@ -4474,7 +4472,7 @@ calkit fix line-endings
 
 ### `calkit doc|document`
 
-Work with documents: LaTeX, Quarto, Word, and PowerPoint.
+Work with documents.
 
 | Command                                             | Description                                          |
 | --------------------------------------------------- | ---------------------------------------------------- |
@@ -4482,6 +4480,8 @@ Work with documents: LaTeX, Quarto, Word, and PowerPoint.
 | [`diff`](#subcommand-doc-document-diff)             | Build a PDF showing what changed in a document.      |
 | [`to-docx`](#subcommand-doc-document-to-docx)       | Export a Word copy of a document for review.         |
 | [`merge-docx`](#subcommand-doc-document-merge-docx) | Merge a reviewed Word document back into its source. |
+| [`latex\|tex`](#subcommand-doc-document-latex-tex)  | Work with LaTeX.                                     |
+| [`quarto`](#subcommand-doc-document-quarto)         | Work with Quarto.                                    |
 
 <a id="subcommand-doc-document-build"></a>
 
@@ -4489,7 +4489,7 @@ Work with documents: LaTeX, Quarto, Word, and PowerPoint.
 
 Build a document with its tool.
 
-A .tex file is built with `calkit latex build`, a Quarto document or notebook with `calkit quarto render`, a Word document with `calkit office word-to-pdf`, and a PowerPoint deck to a PDF beside it with `calkit export pptx`.
+A .tex file is built with `calkit doc latex build`, a Quarto document or notebook with `calkit doc quarto render`, a Word document with `calkit office word-to-pdf`, and a PowerPoint deck to a PDF beside it with `calkit export pptx`.
 
 A document a pipeline stage builds is built as that stage does, i.e., in its environment and with its options, unless options for those are given, and a Quarto project folder builds each document a stage renders in it.
 
@@ -4503,10 +4503,10 @@ calkit doc|document build PATH [TOOL-ARGS...]
 
 Arguments:
 
-| Argument    | Type      | Required | Default | Description                                                                                                               |
-| ----------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `path`      | str       | yes      |         | Document path.                                                                                                            |
-| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit latex build`, which `calkit doc <command> PATH --help` lists. |
+| Argument    | Type      | Required | Default | Description                                                                                                                   |
+| ----------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `path`      | str       | yes      |         | Document path.                                                                                                                |
+| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit doc latex build`, which `calkit doc <command> PATH --help` lists. |
 
 <a id="subcommand-doc-document-diff"></a>
 
@@ -4514,7 +4514,7 @@ Arguments:
 
 Build a PDF showing what changed in a document.
 
-A .tex file is compared with `calkit latex diff`, and options after the path are its own.
+A .tex file is compared with `calkit doc latex diff`, and options after the path are its own.
 
 Usage:
 
@@ -4524,10 +4524,10 @@ calkit doc|document diff PATH [TOOL-ARGS...]
 
 Arguments:
 
-| Argument    | Type      | Required | Default | Description                                                                                                               |
-| ----------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `path`      | str       | yes      |         | Document path.                                                                                                            |
-| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit latex build`, which `calkit doc <command> PATH --help` lists. |
+| Argument    | Type      | Required | Default | Description                                                                                                                   |
+| ----------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `path`      | str       | yes      |         | Document path.                                                                                                                |
+| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit doc latex build`, which `calkit doc <command> PATH --help` lists. |
 
 <a id="subcommand-doc-document-to-docx"></a>
 
@@ -4535,7 +4535,7 @@ Arguments:
 
 Export a Word copy of a document for review.
 
-A .tex file is exported from the PDF it builds, which its pipeline stage, if any, makes sure is current, with `calkit latex to-docx`, and options after the path are its own. A PDF built from LaTeX can be given instead.
+A .tex file is exported from the PDF it builds, which its pipeline stage, if any, makes sure is current, with `calkit doc latex to-docx`, and options after the path are its own. A PDF built from LaTeX can be given instead.
 
 Usage:
 
@@ -4545,10 +4545,10 @@ calkit doc|document to-docx PATH [TOOL-ARGS...]
 
 Arguments:
 
-| Argument    | Type      | Required | Default | Description                                                                                                               |
-| ----------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `path`      | str       | yes      |         | Document path.                                                                                                            |
-| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit latex build`, which `calkit doc <command> PATH --help` lists. |
+| Argument    | Type      | Required | Default | Description                                                                                                                   |
+| ----------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `path`      | str       | yes      |         | Document path.                                                                                                                |
+| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit doc latex build`, which `calkit doc <command> PATH --help` lists. |
 
 <a id="subcommand-doc-document-merge-docx"></a>
 
@@ -4556,7 +4556,7 @@ Arguments:
 
 Merge a reviewed Word document back into its source.
 
-The source is the one it was exported from with `calkit doc to-docx`. A .tex source is merged with `calkit latex merge-docx`, and options after the path are its own.
+The source is the one it was exported from with `calkit doc to-docx`. A .tex source is merged with `calkit doc latex merge-docx`, and options after the path are its own.
 
 Usage:
 
@@ -4566,32 +4566,38 @@ calkit doc|document merge-docx PATH [TOOL-ARGS...]
 
 Arguments:
 
-| Argument    | Type      | Required | Default | Description                                                                                                               |
-| ----------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `path`      | str       | yes      |         | Reviewed .docx to merge.                                                                                                  |
-| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit latex build`, which `calkit doc <command> PATH --help` lists. |
+| Argument    | Type      | Required | Default | Description                                                                                                                   |
+| ----------- | --------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `path`      | str       | yes      |         | Reviewed .docx to merge.                                                                                                      |
+| `tool_args` | list[str] | no       |         | Options and arguments for the tool's command, e.g., `calkit doc latex build`, which `calkit doc <command> PATH --help` lists. |
 
-<a id="command-group-latex-tex"></a>
+<a id="subcommand-doc-document-latex-tex"></a>
 
-### `calkit latex|tex`
+#### `calkit doc|document latex|tex`
 
 Work with LaTeX.
 
-| Command                                                  | Description                                                            |
-| -------------------------------------------------------- | ---------------------------------------------------------------------- |
-| [`from-json`](#subcommand-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                          |
-| [`from-questions`](#subcommand-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.          |
-| [`from-markdown`](#subcommand-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.                |
-| [`map-components`](#subcommand-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands.      |
-| [`warm-cache`](#subcommand-latex-tex-warm-cache)         | Download TeX Live's base packages and build its formats ahead of time. |
-| [`build`](#subcommand-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                          |
-| [`diff`](#subcommand-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.                  |
-| [`to-docx`](#subcommand-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                     |
-| [`merge-docx`](#subcommand-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.             |
+Usage:
 
-<a id="subcommand-latex-tex-from-json"></a>
+```text
+calkit doc|document latex|tex COMMAND [ARGS]...
+```
 
-#### `calkit latex|tex from-json`
+| Command                                                               | Description                                                            |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| [`from-json`](#subcommand-doc-document-latex-tex-from-json)           | Convert a JSON file to LaTeX.                                          |
+| [`from-questions`](#subcommand-doc-document-latex-tex-from-questions) | Write the project's questions and answers as a LaTeX command.          |
+| [`from-markdown`](#subcommand-doc-document-latex-tex-from-markdown)   | Build a Markdown file into a PDF with pandoc and LaTeX.                |
+| [`map-components`](#subcommand-doc-document-latex-tex-map-components) | Map in components a LaTeX document includes with `\ck*` commands.      |
+| [`warm-cache`](#subcommand-doc-document-latex-tex-warm-cache)         | Download TeX Live's base packages and build its formats ahead of time. |
+| [`build`](#subcommand-doc-document-latex-tex-build)                   | Build a PDF of a LaTeX document with latexmk.                          |
+| [`diff`](#subcommand-doc-document-latex-tex-diff)                     | Build a PDF showing what changed in a LaTeX document.                  |
+| [`to-docx`](#subcommand-doc-document-latex-tex-to-docx)               | Export a Word copy of a LaTeX document for review.                     |
+| [`merge-docx`](#subcommand-doc-document-latex-tex-merge-docx)         | Merge a reviewed Word document back into the LaTeX source.             |
+
+<a id="subcommand-doc-document-latex-tex-from-json"></a>
+
+##### `calkit doc|document latex|tex from-json`
 
 Convert a JSON file to LaTeX.
 
@@ -4600,7 +4606,7 @@ This is useful for referencing calculated values in LaTeX documents.
 Usage:
 
 ```text
-calkit latex|tex from-json [OPTIONS] INPUT-FPATHS...
+calkit doc|document latex|tex from-json [OPTIONS] INPUT-FPATHS...
 ```
 
 Arguments:
@@ -4620,9 +4626,9 @@ Options:
 | `--format-base64` | list[str] | no       |         | Like --format, with FORMAT base64-encoded, for one a shell would change, e.g., with '$'. Repeatable.                            |
 | `--format-json`   | str       | no       |         | Additional JSON input to use for formatting. Can be used to add extra keys with simple expressions, etc.                        |
 
-<a id="subcommand-latex-tex-from-questions"></a>
+<a id="subcommand-doc-document-latex-tex-from-questions"></a>
 
-#### `calkit latex|tex from-questions`
+##### `calkit doc|document latex|tex from-questions`
 
 Write the project's questions and answers as a LaTeX command.
 
@@ -4631,7 +4637,7 @@ Each question's text, hypothesis, answer, and notes are rendered from their evid
 Usage:
 
 ```text
-calkit latex|tex from-questions [OPTIONS]
+calkit doc|document latex|tex from-questions [OPTIONS]
 ```
 
 Options:
@@ -4641,9 +4647,9 @@ Options:
 | `--output`, `-o` | list[str] | yes      |           | Output LaTeX file path(s).           |
 | `--command`      | str       | no       | questions | Command name to use in LaTeX output. |
 
-<a id="subcommand-latex-tex-from-markdown"></a>
+<a id="subcommand-doc-document-latex-tex-from-markdown"></a>
 
-#### `calkit latex|tex from-markdown`
+##### `calkit doc|document latex|tex from-markdown`
 
 Build a Markdown file into a PDF with pandoc and LaTeX.
 
@@ -4652,7 +4658,7 @@ Value markers are filled from their results files, which keeps the Markdown itse
 Usage:
 
 ```text
-calkit latex|tex from-markdown [OPTIONS] MD-PATH
+calkit doc|document latex|tex from-markdown [OPTIONS] MD-PATH
 ```
 
 Arguments:
@@ -4673,16 +4679,16 @@ Options:
 | `--no-check`          | boolean   | no       | False   | Don't check the environment first.                                                                 |
 | `--verbose`, `-v`     | boolean   | no       | False   | Print commands.                                                                                    |
 
-<a id="subcommand-latex-tex-map-components"></a>
+<a id="subcommand-doc-document-latex-tex-map-components"></a>
 
-#### `calkit latex|tex map-components`
+##### `calkit doc|document latex|tex map-components`
 
 Map in components a LaTeX document includes with `\ck*` commands.
 
 Usage:
 
 ```text
-calkit latex|tex map-components TEX-FILE
+calkit doc|document latex|tex map-components TEX-FILE
 ```
 
 Arguments:
@@ -4691,9 +4697,9 @@ Arguments:
 | ---------- | ---- | -------- | ------- | -------------------------------------- |
 | `tex_file` | str  | yes      |         | The .tex file whose components to map. |
 
-<a id="subcommand-latex-tex-warm-cache"></a>
+<a id="subcommand-doc-document-latex-tex-warm-cache"></a>
 
-#### `calkit latex|tex warm-cache`
+##### `calkit doc|document latex|tex warm-cache`
 
 Download TeX Live's base packages and build its formats ahead of time.
 
@@ -4702,7 +4708,7 @@ For a machine or image without a project yet, e.g., a dev container, so a TeX Li
 Usage:
 
 ```text
-calkit latex|tex warm-cache [OPTIONS]
+calkit doc|document latex|tex warm-cache [OPTIONS]
 ```
 
 Options:
@@ -4712,9 +4718,9 @@ Options:
 | `--release`       | int     | no       |         | TeX Live release, e.g., 2025; defaults to Calkit's. |
 | `--verbose`, `-v` | boolean | no       | False   | Print verbose output.                               |
 
-<a id="subcommand-latex-tex-build"></a>
+<a id="subcommand-doc-document-latex-tex-build"></a>
 
-#### `calkit latex|tex build`
+##### `calkit doc|document latex|tex build`
 
 Build a PDF of a LaTeX document with latexmk.
 
@@ -4725,7 +4731,7 @@ Also available as `calkit doc build`.
 Usage:
 
 ```text
-calkit latex|tex build [OPTIONS] TEX-FILE
+calkit doc|document latex|tex build [OPTIONS] TEX-FILE
 ```
 
 Arguments:
@@ -4736,22 +4742,21 @@ Arguments:
 
 Options:
 
-| Option               | Type      | Required | Default | Description                                                                                                                                                                                                               |
-| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--env`, `-e`        | str       | no       |         | Environment in which to run latexmk, if applicable.                                                                                                                                                                       |
-| `--as-stage`         | boolean   | no       | False   | Build as the pipeline's latex stage for the document does (its environment, options, and working directory), or in the project's only TeX Live environment if no stage builds it. Other options are added to the stage's. |
-| `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running latexmk.                                                                                                                                                              |
-| `--latexmk-rc`, `-r` | str       | no       |         | Path to a latexmkrc file to use for compilation.                                                                                                                                                                          |
-| `--output-dir`       | str       | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir.                                                                                                                          |
-| `--aux-dir`          | str       | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.                                                                                                                           |
-| `--latexmk-arg`      | list[str] | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.                                                                                                                                       |
-| `--no-synctex`       | boolean   | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                                                                                                                                                    |
-| `--force`, `-f`      | boolean   | no       | False   | Force latexmk to recompile all files, even if they are up to date.                                                                                                                                                        |
-| `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                                                                                                                                                     |
+| Option               | Type      | Required | Default | Description                                                                                      |
+| -------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------------------ |
+| `--env`, `-e`        | str       | no       |         | Environment in which to run latexmk, if applicable.                                              |
+| `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running latexmk.                                     |
+| `--latexmk-rc`, `-r` | str       | no       |         | Path to a latexmkrc file to use for compilation.                                                 |
+| `--output-dir`       | str       | no       |         | Directory for the compiled PDF, relative to the current directory. Passed to latexmk as -outdir. |
+| `--aux-dir`          | str       | no       |         | Directory for auxiliary files, relative to the current directory. Passed to latexmk as -auxdir.  |
+| `--latexmk-arg`      | list[str] | no       |         | Extra argument to pass through to latexmk. Repeat the option to pass more than one.              |
+| `--no-synctex`       | boolean   | no       | False   | Don't generate synctex file for source-to-pdf mapping.                                           |
+| `--force`, `-f`      | boolean   | no       | False   | Force latexmk to recompile all files, even if they are up to date.                               |
+| `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                            |
 
-<a id="subcommand-latex-tex-diff"></a>
+<a id="subcommand-doc-document-latex-tex-diff"></a>
 
-#### `calkit latex|tex diff`
+##### `calkit doc|document latex|tex diff`
 
 Build a PDF showing what changed in a LaTeX document.
 
@@ -4768,7 +4773,7 @@ Also available as `calkit doc diff`.
 Usage:
 
 ```text
-calkit latex|tex diff [OPTIONS] TEX-FILE
+calkit doc|document latex|tex diff [OPTIONS] TEX-FILE
 ```
 
 Arguments:
@@ -4798,9 +4803,9 @@ Options:
 | `--no-check`         | boolean   | no       | False   | Don't check the environment is valid before running.                                                                                                                                                                  |
 | `--verbose`, `-v`    | boolean   | no       | False   | Print verbose output.                                                                                                                                                                                                 |
 
-<a id="subcommand-latex-tex-to-docx"></a>
+<a id="subcommand-doc-document-latex-tex-to-docx"></a>
 
-#### `calkit latex|tex to-docx`
+##### `calkit doc|document latex|tex to-docx`
 
 Export a Word copy of a LaTeX document for review.
 
@@ -4811,7 +4816,7 @@ Also available as `calkit doc to-docx`, which takes the .tex file.
 Usage:
 
 ```text
-calkit latex|tex to-docx [OPTIONS] PDF-PATH
+calkit doc|document latex|tex to-docx [OPTIONS] PDF-PATH
 ```
 
 Arguments:
@@ -4831,9 +4836,9 @@ Options:
 | `--engine`       | str     | no       |         | What makes the Word copy: 'word', which imports the compiled PDF so the copy looks like it, 'libreoffice', which converts the source with TeX4ht's make4ht and then LibreOffice, or 'pandoc', experimental, which converts the source with Pandoc, with numbers and citations from the build. Defaults to Word where it's installed. |
 | `--log`, `-l`    | boolean | no       | False   | Also keep the export record in the project, under .calkit/latex/docx-exports, rather than only on this machine.                                                                                                                                                                                                                      |
 
-<a id="subcommand-latex-tex-merge-docx"></a>
+<a id="subcommand-doc-document-latex-tex-merge-docx"></a>
 
-#### `calkit latex|tex merge-docx`
+##### `calkit doc|document latex|tex merge-docx`
 
 Merge a reviewed Word document back into the LaTeX source.
 
@@ -4844,7 +4849,7 @@ Also available as `calkit doc merge-docx`.
 Usage:
 
 ```text
-calkit latex|tex merge-docx [OPTIONS] DOCX-PATH
+calkit doc|document latex|tex merge-docx [OPTIONS] DOCX-PATH
 ```
 
 Arguments:
@@ -4860,30 +4865,36 @@ Options:
 | `--no-comments` | boolean | no       | False   | Don't write comments to the .tex.                                                                             |
 | `--log`, `-l`   | boolean | no       | False   | Also keep the merge record in the project, under .calkit/latex/docx-merges, rather than only on this machine. |
 
-<a id="command-group-quarto"></a>
+<a id="subcommand-doc-document-quarto"></a>
 
-### `calkit quarto`
+#### `calkit doc|document quarto`
 
 Work with Quarto.
 
-| Command                               | Description                                 |
-| ------------------------------------- | ------------------------------------------- |
-| [`render`](#subcommand-quarto-render) | Render a Quarto document in an environment. |
+Usage:
 
-<a id="subcommand-quarto-render"></a>
+```text
+calkit doc|document quarto COMMAND [ARGS]...
+```
 
-#### `calkit quarto render`
+| Command                                            | Description                                 |
+| -------------------------------------------------- | ------------------------------------------- |
+| [`render`](#subcommand-doc-document-quarto-render) | Render a Quarto document in an environment. |
+
+<a id="subcommand-doc-document-quarto-render"></a>
+
+##### `calkit doc|document quarto render`
 
 Render a Quarto document in an environment.
 
-Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. The values the document shows with the 'ckvalue' shortcode are checked first, and the Quarto extension that reads them from their results files is written.
+Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. If no environment or format is given and a pipeline `quarto` stage renders the document, its environment, format, arguments, and working directory are used. The values the document shows with the 'ckvalue' shortcode are checked first, and the Quarto extension that reads them from their results files is written.
 
 Also available as `calkit doc build`.
 
 Usage:
 
 ```text
-calkit quarto render [OPTIONS] TARGET-PATH [QUARTO-ARGS...]
+calkit doc|document quarto render [OPTIONS] TARGET-PATH [QUARTO-ARGS...]
 ```
 
 Arguments:
@@ -4895,13 +4906,12 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                                                        |
-| ------------------------ | ------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto, or `_system` for Quarto installed on this machine. There's no default.                                      |
-| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.                                              |
-| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                                                          |
-| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                                                             |
-| `--as-stage`             | boolean | no       | False   | Render as the pipeline's quarto stage for the document does (its environment, format, arguments, and working directory). Extra arguments are added to the stage's. |
+| Option                   | Type    | Required | Default | Description                                                                                                                   |
+| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto, or `_system` for Quarto installed on this machine. There's no default. |
+| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.         |
+| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                     |
+| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                        |
 
 <a id="command-group-overleaf-ol"></a>
 

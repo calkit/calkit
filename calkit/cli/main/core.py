@@ -118,10 +118,14 @@ app.add_typer(fix_app, name="fix", help="Fix things.")
 app.add_typer(
     doc_app,
     name="doc|document",
-    help="Work with documents: LaTeX, Quarto, Word, and PowerPoint.",
+    help="Work with documents.",
 )
-app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
-app.add_typer(quarto_app, name="quarto", help="Work with Quarto.")
+# Kept hidden for existing dvc.yaml stages, scripts, and editor configs;
+# visible under 'calkit doc'
+app.add_typer(
+    latex_app, name="latex|tex", help="Work with LaTeX.", hidden=True
+)
+app.add_typer(quarto_app, name="quarto", help="Work with Quarto.", hidden=True)
 app.add_typer(overleaf_app, name="overleaf|ol", help="Interact with Overleaf.")
 app.add_typer(hub_app, name="hub|cloud", help="Interact with a Calkit hub.")
 app.add_typer(

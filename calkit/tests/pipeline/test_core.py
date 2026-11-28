@@ -6036,7 +6036,7 @@ def test_find_document_stages(
             }
         }
     )
-    for d in ["paper", "thesis", "site", "elsewhere"]:
+    for d in ["paper", "thesis", "site", "build", "elsewhere"]:
         os.makedirs(d)
     # A document or a latex stage's PDF, from anywhere in the project,
     # under the stage's wdir
@@ -6050,6 +6050,7 @@ def test_find_document_stages(
         (".", "nb.ipynb", None, False, ["nb"]),
         (".", "nb.ipynb", ["quarto"], False, []),
         ("site", ".", ["quarto"], True, ["pub"]),
+        (".", "build", ["latex"], True, []),
         (".", ".", ["quarto", "latex"], True, ["paper", "thesis", "pub"]),
         (".", "plot.py", None, False, []),
     ]:

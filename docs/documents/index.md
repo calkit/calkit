@@ -78,5 +78,5 @@ in its environment and with its options,
 and a Quarto project folder, e.g., `calkit doc build .`,
 builds the documents its stages render.
 The other commands work with LaTeX for now.
-See the [CLI reference](../cli-reference.md) for each tool's own commands,
-e.g., `calkit latex build`, and their options.
+Tool-specific commands live under `calkit doc latex` and `calkit doc quarto`
+(see the [CLI reference](../cli-reference.md) for their options).

@@ -24,6 +24,7 @@ from calkit.models.pipeline import LatexStage, Pipeline
 from calkit.pipeline import (
     StaleStage,
     collapse_dvc_stages,
+    get_stage_run_problems,
     stages_are_similar,
 )
 from calkit.pipeline.core import (
@@ -6304,6 +6305,79 @@ def test_to_dvc_warns_on_system_env(tmp_dir, capsys):
     assert warned == ["plot", "fit", "explore"]
     assert "calkit new uv-env" in err
     assert "calkit new renv" in err
+
+
+def test_get_stage_run_problems(tmp_dir: str) -> None:
+    # A pipeline run with DVC alone has no records to compare, which isn't
+    # a mismatch, and a frozen stage, here frozen in dvc.yaml, has none to
+    # have
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "a": {"cmd": "echo a > a.txt", "outs": ["a.txt"]},
+                    "always": {
+                        "cmd": "echo b > b.txt",
+                        "outs": ["b.txt"],
+                        "always_changed": True,
+                    },
+                    "frozen": {
+                        "cmd": "echo f > f.txt",
+                        "outs": ["f.txt"],
+                        "frozen": True,
+                    },
+                }
+            },
+            f,
+        )
+    with open("f.txt", "w") as f:
+        f.write("trained elsewhere\n")
+    subprocess.check_call(["dvc", "repro", "-q"])
+    os.makedirs("elsewhere")
+    found = get_stage_run_problems(wdir=os.getcwd())
+    assert found == {
+        "changed": [],
+        "unrecorded": [
+            "Stage 'a' has no recorded run",
+            "Stage 'always' has no recorded run",
+        ],
+    }
+    # From another directory too
+    wdir = os.getcwd()
+    os.chdir("elsewhere")
+    try:
+        assert get_stage_run_problems(wdir=wdir) == found
+    finally:
+        os.chdir(wdir)
+    # A record from before the checksum was named dvc_lock_hash has nothing
+    # to compare either, while one that disagrees is a mismatch
+    lock = calkit.dvc.read_lock_stages()
+    os.makedirs(".calkit", exist_ok=True)
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump(
+            {
+                "a": {"dvc_lock": "md5:old"},
+                "always": {
+                    "dvc_lock_hash": calkit.dvc.stage_lock_hash(lock["always"])
+                },
+            },
+            f,
+        )
+    assert get_stage_run_problems() == {
+        "changed": [],
+        "unrecorded": ["Stage 'a' has no recorded run"],
+    }
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        json.dump({"a": {"dvc_lock_hash": "sha256:other"}}, f)
+    assert get_stage_run_problems()["changed"] == [
+        "Stage 'a' has changed in dvc.lock since its last recorded run"
+    ]
+    with open(calkit.STAGE_RUNS_FPATH, "w") as f:
+        f.write("{")
+    with pytest.raises(ValueError):
+        get_stage_run_problems()
 
 
 def test_find_document_stages(

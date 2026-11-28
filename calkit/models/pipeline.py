@@ -861,6 +861,7 @@ class Stage(Model):
         is_output: Callable[[str], bool],
         write_files: bool = False,
         is_exact_output: Callable[[str], bool] | None = None,
+        edit_sources: bool = True,
     ) -> None:
         """Work out what the stage depends on from the project before it's
         compiled, for a kind of stage whose sources name some of it.
@@ -871,7 +872,8 @@ class Stage(Model):
         whether a stage declares it as is. With ``write_files``, the stage also
         writes files it reads that aren't kept in the project, since it's
         about to run or have its status checked. That happens on every
-        call, so only fast work belongs here.
+        call, so only fast work belongs here. With ``edit_sources`` too, it
+        may fix files kept in the project, e.g., a document's preamble.
         """
 
     @property
@@ -1231,6 +1233,7 @@ class PythonScriptStage(Stage):
         is_output: Callable[[str], bool],
         write_files: bool = False,
         is_exact_output: Callable[[str], bool] | None = None,
+        edit_sources: bool = True,
     ) -> None:
         """Find the ``.python-version`` uv picks the interpreter for a
         script's own environment with, checking another stage doesn't make
@@ -1773,6 +1776,7 @@ class LatexStage(Stage):
         is_output: Callable[[str], bool],
         write_files: bool = False,
         is_exact_output: Callable[[str], bool] | None = None,
+        edit_sources: bool = True,
     ) -> None:
         """Read which components the document includes with calkit.sty's
         commands, since they're as much inputs as its source, and with
@@ -1808,6 +1812,7 @@ class LatexStage(Stage):
         # typed into a document that never loaded it
         if (
             write_files
+            and edit_sources
             and not self._loads_calkit
             and calkit.latex.load_package(document)
         ):
@@ -2023,6 +2028,7 @@ class QuartoStage(Stage):
         is_output: Callable[[str], bool],
         write_files: bool = False,
         is_exact_output: Callable[[str], bool] | None = None,
+        edit_sources: bool = True,
     ) -> None:
         """Find the results files the document's ``ckvalue`` shortcodes read,
         and the documents it embeds cells' outputs from, since they're as
@@ -2072,7 +2078,8 @@ class QuartoStage(Stage):
                 or is_output(value.path)
             ) and value.path not in self._value_paths:
                 self._value_paths.append(value.path)
-        if write_files and values:
+        # Kept in Git, so a source of the project's
+        if write_files and edit_sources and values:
             calkit.quarto.write_components(
                 self.project_target_path, wdir=project_dir
             )
@@ -2307,6 +2314,7 @@ class ReferencesCheckStage(Stage):
         is_output: Callable[[str], bool],
         write_files: bool = False,
         is_exact_output: Callable[[str], bool] | None = None,
+        edit_sources: bool = True,
     ) -> None:
         """Find the files the document inputs and the bibliographies it
         names, including ones a stage makes that aren't there yet."""
@@ -4173,7 +4181,10 @@ class Pipeline(Model):
                     _remove_period_file(dirpath, stop=root_path)
 
     def preprocess_stages(
-        self, project_dir: str | None, write_files: bool = False
+        self,
+        project_dir: str | None,
+        write_files: bool = False,
+        edit_sources: bool = True,
     ) -> None:
         """Let each stage work out what it depends on from the project,
         telling it where the project is and what stages make.
@@ -4213,6 +4224,7 @@ class Pipeline(Model):
                 is_output,
                 write_files=write_files,
                 is_exact_output=outputs.__contains__,
+                edit_sources=edit_sources,
             )
         # A Quarto document embedding a notebook another stage executes waits
         # for that stage, which writes outputs into it without declaring it

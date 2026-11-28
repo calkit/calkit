@@ -586,21 +586,24 @@ def test_check_repro_refvals_cli(tmp_dir):
 
     _make_project()
     env = os.environ | {"COLUMNS": "200"}
-    out = subprocess.check_output(
+    # The problems with quoted values fail the check either way
+    out = subprocess.run(
         ["calkit", "check", "repro", "--offline", "-c", "numbers"],
+        capture_output=True,
         text=True,
         env=env,
-    )
+    ).stdout
     # Brackets come through, rather than reading as Rich's markup
     assert "as in [@liu2025]" in out
     assert "p. 2 of liu2025" in out
     assert "not in liu2025" in out
     assert "calkit new ref-value liu2025 NAME --value 0.10 --page 2" in out
-    out = subprocess.check_output(
+    out = subprocess.run(
         ["calkit", "check", "repro", "--offline", "-c", "refvals"],
+        capture_output=True,
         text=True,
         env=env,
-    )
+    ).stdout
     assert "the context is on page 2, not 1" in out
     # Recording one checks it against the PDF first
     p = subprocess.run(

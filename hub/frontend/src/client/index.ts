@@ -1542,6 +1542,7 @@ export type {
   StorageUsage,
   SubscriptionPlan,
   SubscriptionUpdate,
+  SummaryLine,
   Table,
   TableText,
   TemplatePublic,

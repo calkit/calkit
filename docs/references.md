@@ -209,6 +209,18 @@ A number the cited reference doesn't have may be a misquote.
 See the problems with `calkit check repro -c refvals`, and the numbers with
 `-c numbers`.
 
+<!-- TODO: needs human review -->
+
+It checks each document's citations too, as `calkit check references`
+does, failing on a key no bibliography defines, a DOI that isn't
+registered, or an entry that describes a different work than its
+identifier. Each cited reference is looked up in Crossref, DataCite,
+OpenAlex, and arXiv, which takes a while the first time for
+a long bibliography. Answers are cached in `.calkit/local`, so a rerun is
+quick and needs no network. With `--offline`, only the cache is used, and
+a reference not in it is reported as not looked up (`-c
+unconfirmed-citations`), rather than as a problem.
+
 ### Where the PDFs come from
 
 PDFs are never stored in the project, since most papers can't be

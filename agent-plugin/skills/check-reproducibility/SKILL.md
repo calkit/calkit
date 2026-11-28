@@ -8,17 +8,21 @@ description: Check whether a project is fully traceable, and fix what isn't,
 
 # Check and fix reproducibility
 
-`calkit check repro` reports what a static reading of the project can
-establish: whether there is a pipeline, whether stages run in declared
-environments, whether artifacts have provenance, and whether any number in
-a manuscript is one nobody can trace.
+<!-- TODO: needs human review -->
+
+`calkit check repro` audits the project: whether there is a pipeline and
+it is up to date, whether `dvc.lock` matches the recorded runs, whether
+artifacts have provenance, whether any number in a manuscript is one
+nobody can trace, whether citations resolve, and whether answers' evidence
+holds. It separates problems, which fail it, from advice, which doesn't.
 
 ## Division of labor
 
 Deterministic, done by `calkit check repro --json` --- never re-derive by
 hand:
 
-- whether the project is a Git and DVC repo with a remote and a pipeline;
+- whether the project is a Git and DVC repo with a pipeline, and a remote
+  if anything is stored with DVC;
 - which stages run outside a declared environment;
 - which artifacts have no `stage`, `imported_from`, or `created_by`;
 - which scripts no stage refers to;
@@ -38,16 +42,52 @@ Judgment, done here:
 
 ## Procedure
 
+<!-- TODO: needs human review -->
+
 1. Run `calkit check repro --json` and read the report. The plain output
    is a summary, each countable line naming the `-c` that opens it;
-   `--json` carries every finding. The command exits non-zero only for
-   `retyped_values`, a value the project's own pipeline computes and the
-   document typed anyway; everything else is advice and leaves the exit
-   code alone. Read the findings, not the exit code.
+   `--json` carries every finding, with the summary's lines in `summary`,
+   each with `ok` true or false for a check and null for advice. The
+   command exits non-zero, and `passed` is false, when any check finds a
+   problem; advice, e.g., scripts no stage runs, leaves it alone. Read the
+   findings, not only the exit code.
 
 2. **Pipeline and environment findings** come first: a value can't be made
    traceable until there is a pipeline to make it. See the
    `create-pipeline` and `add-pipeline-stage` skills.
+
+   <!-- TODO: needs human review -->
+
+   The problems that need the working tree, each a list in `--json`, and
+   what to do about them:
+
+   - `uncompiled_stages` (`-c uncompiled`): `dvc.yaml` isn't what
+     `calkit.yaml` compiles to, e.g., a stage edited without running.
+     `calkit run` compiles and runs it; commit `dvc.yaml` and `dvc.lock`.
+   - `stale_stages` (`-c stale`): stages out of date, with what changed,
+     e.g., `never run`, `data/raw.csv modified`, or `data/raw.csv missing`.
+     Run `calkit run` and commit what it writes. Never edit an output or
+     `dvc.lock` to make a stage current.
+   - `stage_run_problems` (`-c stage-runs`): a `dvc.lock` entry that
+     doesn't match the run recorded for it, e.g., after `dvc commit` on an
+     edited output. Rerun the stage with `calkit run --force <stage>`, and
+     tell the user, since its output may have been edited by hand.
+   - `storage_problems` (`-c storage`): paths not stored where declared.
+     `calkit check storage` says which, and `calkit check storage --fix`
+     fixes most of them.
+   - `citation_problems` (`-c citations`): a key no bibliography defines,
+     a DOI that isn't registered, or an entry that describes a different
+     work. `calkit check references <document>` reports each in full; fix
+     the bibliography entry from the real work, never by inventing one.
+   - `question_problems` (`-c questions`): answers whose evidence is
+     missing, out of date, or broken. See the `check-questions` skill.
+
+   Advice doesn't fail it: `absent_stages` (`-c not-present`) are stages
+   whose files are stored outside Git and not here, which `calkit pull`
+   fetches; `stage_runs_unrecorded` are stages with no run recorded, e.g.,
+   run with DVC alone, which `calkit run --force <stage>` records; and
+   `not_checked` lists checks that couldn't run, e.g., while another DVC
+   process holds the lock.
 
    <!-- TODO: needs human review -->
 

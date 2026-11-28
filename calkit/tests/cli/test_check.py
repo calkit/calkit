@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -1609,8 +1610,12 @@ def test_check_repro_literals(tmp_dir):
     result = subprocess.run(
         ["calkit", "check", "repro"], capture_output=True, text=True
     )
-    # A retyped value is the one finding that fails the check
+    # A retyped value fails the check
     assert result.returncode == 1
+    assert (
+        "Values typed out rather than read from the pipeline: 1 "
+        in (result.stdout.split("Advice:")[0])
+    )
     # 0.42 is computed by the pipeline and typed into the document anyway:
     # right today, wrong the next time that stage runs. That is the copy
     # and paste worth catching, and it counts against the project.
@@ -1619,8 +1624,10 @@ def test_check_repro_literals(tmp_dir):
     )
     # 3.14 has nothing behind it, which is worth a look but is not a
     # defect: most numbers in a paper are not results
-    assert "Numbers with nothing recorded behind them: 1" in result.stdout
-    assert "worth a look" in result.stdout
+    assert (
+        "Numbers with nothing recorded behind them: 1"
+        in (result.stdout.split("Advice:")[1])
+    )
     # The summary stays a summary and points at the findings
     assert "3.14" not in result.stdout
     assert "0.42" not in result.stdout
@@ -1632,7 +1639,8 @@ def test_check_repro_literals(tmp_dir):
     )
     assert "[-c retyped]" in result.stdout
     assert "[-c numbers]" in result.stdout
-    assert "calkit check repro -c retyped" in result.stdout
+    # The hint names the first problem's category: the pipeline hasn't run
+    assert "e.g., 'calkit check repro -c stale'" in result.stdout
     out = subprocess.run(
         ["calkit", "check", "repro", "-c", "retyped"],
         capture_output=True,
@@ -1744,6 +1752,292 @@ def test_check_repro_literals(tmp_dir):
     assert [f["value"] for f in parsed["unattributed_numbers"]] == [
         "3.14",
         "0.6194",
+    ]
+
+
+def test_check_repro_audit(tmp_dir: str) -> None:
+    def check_repro(*args: str, cwd: str = ".") -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["calkit", "check", "repro", "--offline", *args],
+            capture_output=True,
+            text=True,
+            cwd=cwd,
+        )
+
+    def get_report(cwd: str = ".") -> tuple[int, dict]:
+        res = check_repro("--json", cwd=cwd)
+        return res.returncode, json.loads(res.stdout)
+
+    def get_lines(report: dict) -> dict[str, dict]:
+        return {line["text"]: line for line in report["summary"]}
+
+    def get_porcelain(cwd: str = ".") -> str:
+        return subprocess.check_output(
+            ["git", "status", "--porcelain"], text=True, cwd=cwd
+        )
+
+    def write_ck_info() -> None:
+        with open("calkit.yaml", "w") as f:
+            calkit.ryaml.dump(ck_info, f)
+
+    def commit() -> None:
+        subprocess.check_call(["git", "add", "-A"])
+        subprocess.check_call(["git", "commit", "-q", "-m", "Commit"])
+
+    subprocess.check_call(["calkit", "init"])
+    with open("README.md", "w") as f:
+        f.write("Run `calkit run`.\n")
+    # A document using calkit.sty without loading it, in a pipeline never
+    # compiled: the audit says so, and writes nothing in the project, e.g.,
+    # dvc.yaml, a .gitignore, or the package into the document
+    with open("main.tex", "w") as f:
+        f.write(
+            "\\documentclass{article}\n\\begin{document}\n"
+            "\\ckvalue{a.json}{n}\n\\end{document}\n"
+        )
+    with open("in.txt", "w") as f:
+        f.write("1\n")
+    ck_info: dict = {
+        "pipeline": {
+            "stages": {
+                "a": {
+                    "kind": "shell-command",
+                    "command": "echo '{\"n\": 1}' > a.json",
+                    "environment": "_system",
+                    "inputs": ["in.txt"],
+                    "outputs": [{"path": "a.json", "storage": "git"}],
+                },
+                "paper": {
+                    "kind": "latex",
+                    "environment": "_system",
+                    "target_path": "main.tex",
+                },
+            }
+        }
+    }
+    write_ck_info()
+    commit()
+    code, report = get_report()
+    assert code == 1
+    assert report["uncompiled_stages"] == ["a", "paper"]
+    assert get_porcelain() == ""
+    with open("main.tex") as f:
+        assert "usepackage" not in f.read()
+    del ck_info["pipeline"]["stages"]["paper"]
+    write_ck_info()
+    subprocess.check_call(["calkit", "run"])
+    commit()
+    code, report = get_report()
+    assert code == 0, report["summary"]
+    assert report["passed"]
+    assert get_porcelain() == ""
+    lines = get_lines(report)
+    assert lines["Pipeline stages out of date"]["ok"]
+    assert lines["Stages in dvc.yaml not compiled from calkit.yaml"]["ok"]
+    assert lines["Stages in dvc.lock not matching a recorded run"]["ok"]
+    # Nothing is declared, so nothing claims to pass for it, and everything
+    # is in Git, so no remote is asked for
+    assert not any("provenance" in text for text in lines)
+    assert not any("remote" in text for text in lines)
+    # Advice has no verdict, and doesn't fail the check
+    assert lines["No dev container spec"]["ok"] is None
+    out = check_repro().stdout
+    assert "0/0" not in out
+    assert "Passed" in out
+    assert out.index("Checks:") < out.index("Advice:")
+    # An input only rewritten with CRLF, as Git for Windows can check one
+    # out, is advice, but one edited too is out of date
+    with open("in.txt", "wb") as f:
+        f.write(b"1\r\n")
+    code, report = get_report()
+    assert code == 0, report["summary"]
+    assert report["eol_rewritten"] == ["in.txt"]
+    assert "calkit fix line-endings" in report["recommendation"]
+    with open("in.txt", "wb") as f:
+        f.write(b"5\r\n")
+    code, report = get_report()
+    assert code == 1
+    assert report["stale_stages"] == ["a: in.txt modified"]
+    with open("in.txt", "w") as f:
+        f.write("1\n")
+    # A stage changed in calkit.yaml but not compiled fails it
+    ck_info["pipeline"]["stages"]["a"]["command"] = (
+        "echo '{\"n\": 2}' > a.json"
+    )
+    write_ck_info()
+    code, report = get_report()
+    assert code == 1
+    assert report["uncompiled_stages"] == ["a"]
+    assert get_porcelain() == " M calkit.yaml\n"
+    subprocess.check_call(["calkit", "run"])
+    commit()
+    # So does a stale stage, and its category says what changed
+    with open("in.txt", "w") as f:
+        f.write("2\n")
+    code, report = get_report()
+    assert code == 1
+    assert report["stale_stages"] == ["a: in.txt modified"]
+    res = check_repro()
+    # Without the mark, which a Windows console can't encode
+    assert "Pipeline stages out of date: 1 " in res.stdout
+    assert "[-c stale]" in res.stdout
+    assert "Failed: 1 problem" in res.stdout
+    assert "calkit check repro -c stale" in res.stdout
+    res = check_repro("-c", "stale")
+    assert res.returncode == 1
+    assert "a: in.txt modified" in res.stdout
+    # A missing input is said to be missing
+    os.remove("in.txt")
+    code, report = get_report()
+    assert report["stale_stages"] == ["a: in.txt missing"]
+    subprocess.check_call(["git", "checkout", "--", "in.txt"])
+    # And a dvc.lock entry no run made fails it
+    with open("a.json", "w") as f:
+        f.write('{"n": 3}\n')
+    subprocess.check_call(["dvc", "commit", "-f", "-q", "a"])
+    code, report = get_report()
+    assert code == 1
+    assert report["stale_stages"] == []
+    assert report["stage_run_problems"] == [
+        "Stage 'a' has changed in dvc.lock since its last recorded run"
+    ]
+    subprocess.check_call(["calkit", "run", "--force"])
+    # An output stored with DVC needs a remote to reach anyone else, which
+    # is advice, and a clone that hasn't pulled it, or what a stage made
+    # from it, passes, saying they aren't there
+    ck_info["pipeline"]["stages"]["b"] = {
+        "kind": "shell-command",
+        "command": "echo b > b.txt",
+        "environment": "_system",
+        "outputs": ["b.txt"],
+    }
+    ck_info["pipeline"]["stages"]["c"] = {
+        "kind": "shell-command",
+        "command": "cat b.txt > c.txt",
+        "environment": "_system",
+        "inputs": ["b.txt"],
+        "outputs": ["c.txt"],
+    }
+    write_ck_info()
+    subprocess.check_call(["calkit", "run"])
+    commit()
+    code, report = get_report()
+    assert code == 0, report["summary"]
+    assert report["stores_in_dvc"]
+    remote = "No DVC remote, though files are stored with DVC"
+    assert get_lines(report)[remote]["ok"] is None
+    clone = tempfile.mkdtemp()
+    subprocess.check_call(["git", "clone", "-q", ".", clone])
+    code, report = get_report(cwd=clone)
+    assert code == 0, report["summary"]
+    assert report["stale_stages"] == []
+    assert report["absent_stages"] == [
+        "b: b.txt missing",
+        "c: b.txt missing",
+    ]
+    assert get_porcelain(cwd=clone) == ""
+    out = check_repro(cwd=clone).stdout
+    assert "calkit pull" in out.split("Advice:")[1]
+    # A citation defined in no bibliography fails, while one that can't be
+    # looked up offline is only reported
+    with open("references.bib", "w") as f:
+        f.write("@article{real2020, title={A Real Paper}, year={2020}}\n")
+    with open("paper.md", "w") as f:
+        f.write("As shown before [@real2020], and since [@ghost2021].\n")
+    ck_info["references"] = [{"path": "references.bib"}]
+    ck_info["publications"] = [
+        {
+            "path": "paper.md",
+            "title": "Paper",
+            "kind": "report",
+            "created_by": {"email": "me@example.com"},
+        }
+    ]
+    write_ck_info()
+    code, report = get_report()
+    assert code == 1
+    assert report["citation_problems"] == [
+        "paper.md: ghost2021 (missing-from-bib)"
+    ]
+    assert report["citations_unconfirmed"] == [
+        "paper.md: real2020 (unchecked)"
+    ]
+    out = check_repro().stdout
+    assert "Citations that resolve to nothing or a different work: 1" in out
+    assert "Publications with provenance recorded" in out
+    with open("paper.md", "w") as f:
+        f.write("As shown before [@real2020].\n")
+    # An answer whose evidence the pipeline would rebuild fails too
+    ck_info["questions"] = [
+        {
+            "question": "What is n?",
+            "answer": "It is {v}.",
+            "evidence": [
+                {"kind": "value", "path": "a.json", "key": "n", "name": "v"}
+            ],
+        }
+    ]
+    write_ck_info()
+    code, report = get_report()
+    assert code == 0, report["summary"]
+    assert report["question_problems"] == []
+    with open("in.txt", "w") as f:
+        f.write("4\n")
+    code, report = get_report()
+    assert code == 1
+    assert report["question_problems"] == ["1. [stale] What is n?"]
+    res = check_repro("-c", "questions")
+    assert "1. [stale] What is n?" in res.stdout
+
+
+def test_check_repro_audit_plain_dvc(tmp_dir: str) -> None:
+    def get_report() -> tuple[int, dict]:
+        res = subprocess.run(
+            ["calkit", "check", "repro", "--offline", "--json"],
+            capture_output=True,
+            text=True,
+        )
+        return res.returncode, json.loads(res.stdout)
+
+    # A project with no pipeline, e.g., of data, passes, saying so
+    subprocess.check_call(["git", "init", "-q"])
+    subprocess.check_call(["dvc", "init", "-q"])
+    code, report = get_report()
+    assert code == 0, report["summary"]
+    assert report["stale_stages"] is None
+    assert "No pipeline" in [line["text"] for line in report["summary"]]
+    # One run with DVC alone passes: a stage DVC always reruns isn't out of
+    # date, a frozen one isn't checked against a run, and the rest have no
+    # run recorded, which is advice
+    with open("dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "a": {"cmd": "echo a > a.txt", "outs": ["a.txt"]},
+                    "always": {
+                        "cmd": "echo b > b.txt",
+                        "outs": [{"b.txt": {"cache": False}}],
+                        "always_changed": True,
+                    },
+                    "frozen": {
+                        "cmd": "echo f > f.txt",
+                        "outs": [{"f.txt": {"cache": False}}],
+                        "frozen": True,
+                    },
+                }
+            },
+            f,
+        )
+    with open("f.txt", "w") as f:
+        f.write("trained elsewhere\n")
+    subprocess.check_call(["dvc", "repro", "-q"])
+    code, report = get_report()
+    assert code == 0, report["summary"]
+    assert report["stale_stages"] == []
+    assert report["stage_run_problems"] == []
+    assert report["stage_runs_unrecorded"] == [
+        "Stage 'a' has no recorded run",
+        "Stage 'always' has no recorded run",
     ]
 
 

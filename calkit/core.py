@@ -1494,6 +1494,13 @@ def find_app_path(name: str) -> str | None:
         from calkit.conda import find_conda_exe, find_mamba_exe
 
         return find_conda_exe() if name == "conda" else find_mamba_exe()
+    # Julia runs through juliaup's launcher when its 'julia' isn't on the
+    # PATH, which is found by its path rather than its bare name
+    if name == "julia":
+        from calkit.julia import get_julia_exe
+
+        exe = get_julia_exe()
+        return exe if os.path.isabs(exe) else None
     # Apps that aren't run by their name, or not on every OS
     if name in calkit.office.OFFICE_APPS:
         return calkit.office.find_app_path(name)

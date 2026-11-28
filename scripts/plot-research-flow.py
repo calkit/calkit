@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "matplotlib>=3.11.2",
+#     "numpy>=2.5.5",
+# ]
+# ///
 """Plot the stage-gate versus lean research flow simulation."""
 
 import json

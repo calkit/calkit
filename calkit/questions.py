@@ -2013,7 +2013,11 @@ def pipeline_stage_sets(
     failing the whole check, since most of what it reports doesn't depend on
     the pipeline at all.
     """
-    from calkit.pipeline import frozen_tainted_stage_names, get_status
+    from calkit.pipeline import (
+        frozen_tainted_stage_names,
+        get_downstream_stage_names,
+        get_status,
+    )
 
     if not check_pipeline:
         return set(), set()
@@ -2035,7 +2039,10 @@ def pipeline_stage_sets(
                 clean_notebooks=False,
                 compile_to_dvc=False,
             )
-            stale = {n.split("@")[0] for n in status.stale_stage_names}
+            # What reads an out-of-date stage's outputs is rebuilt with it
+            stale = get_downstream_stage_names(
+                {n.split("@")[0] for n in status.stale_stage_names}, wdir=wdir
+            )
         except Exception:
             pass
     try:

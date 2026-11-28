@@ -202,8 +202,8 @@ button.ck-value{all:unset;cursor:pointer;
   border-bottom:1px dotted currentColor}
 button.ck-value:focus-visible{outline:2px solid #0d6efd;outline-offset:2px}
 .ck-value:not(.ck-ok),.ck-value.ck-outdated{border-bottom-color:#b35900}
-.ck-flag{color:#b35900;font-size:.7em;margin-left:.1em;
-  vertical-align:super}
+.ck-flagged::after{content:"⚠";color:#b35900;font-size:.7em;
+  margin-left:.1em;vertical-align:super}
 .ck-popover{max-width:min(48rem,92vw);max-height:80vh;overflow:auto;
   padding:1rem;border:1px solid var(--bs-border-color,#dee2e6);
   border-radius:.375rem;font-size:.9em;

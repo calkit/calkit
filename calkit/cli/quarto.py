@@ -209,14 +209,21 @@ def render(
             if components
             else None
         )
+        # Not working out where something came from leaves it shown
+        # without, rather than stopping the render
         if (components or values) and filter_problem is None:
-            calkit.quarto.write_provenance(
-                components,
-                document_rel,
-                ck_info,
-                wdir=project_dir,
-                values=values,
-            )
+            try:
+                calkit.quarto.write_provenance(
+                    components,
+                    document_rel,
+                    ck_info,
+                    wdir=project_dir,
+                    values=values,
+                )
+            except Exception as e:
+                warn(
+                    f"Couldn't work out where what {target_path} shows came from: {e}"
+                )
         if values or components:
             calkit.quarto.write_components(document_rel, wdir=project_dir)
     except (MarkdownParseError, ValueError) as e:

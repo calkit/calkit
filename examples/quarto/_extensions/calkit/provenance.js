@@ -39,8 +39,13 @@
     for (const pre of pres) {
       pre.dataset.drawn = "true";
       const id = "ck-mermaid-" + Math.random().toString(36).slice(2);
-      const { svg } = await mermaid.render(id, pre.textContent);
-      pre.innerHTML = svg;
+      // One Mermaid can't draw stays as its source, not the rest
+      try {
+        const { svg } = await mermaid.render(id, pre.textContent);
+        pre.innerHTML = svg;
+      } catch {
+        continue;
+      }
     }
   }
   document.addEventListener("toggle", (event) => {

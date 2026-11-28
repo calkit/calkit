@@ -1,0 +1,324 @@
+"""Tests for ``calkit.cli.kit``."""
+
+import hashlib
+import io
+import os
+import subprocess
+import urllib.parse
+import zipfile
+
+import git
+from typer.testing import CliRunner
+
+import calkit
+import calkit.hub
+import calkit.kits
+from calkit.cli.main import app
+
+runner = CliRunner()
+
+
+def test_create(kit_project, monkeypatch, tmp_path):
+    remote = tmp_path / "remote.git"
+    subprocess.check_call(["git", "init", "-q", "--bare", str(remote)])
+    subprocess.check_call(["git", "remote", "set-url", "origin", str(remote)])
+    head_sha = git.Repo().head.commit.hexsha
+    # Written beside where it's run, leaving the original alone
+    res = runner.invoke(app, ["kit", "bundle", "figures/fig.png"])
+    assert res.exit_code == 0, res.stdout
+    assert "Wrote fig.calkit.png (calkit:" in res.stdout
+    kit = calkit.kits.read("fig.calkit.png")
+    assert kit is not None
+    assert kit.manifest.source.up_to_date
+    assert calkit.kits.read("figures/fig.png") is None
+    # It's recorded as a tag at its commit, pushed with that commit, without
+    # changing the project's files
+    assert "Recorded as tag kit/figures/fig.png/" in res.stdout
+    records = calkit.kits.get_records()
+    assert len(records) == 1
+    assert records[0]["artifact_path"] == "figures/fig.png"
+    assert records[0]["commit_sha"] == head_sha
+    assert records[0]["calkit_sha256"] == hashlib.sha256(kit.kit).hexdigest()
+    tag_name = records[0]["name"]
+    assert git.Repo().commit(tag_name).hexsha == head_sha
+    assert not git.Repo().is_dirty()
+    remote_tags = subprocess.check_output(
+        ["git", "ls-remote", "--tags", str(remote)], text=True
+    )
+    assert f"refs/tags/{tag_name}" in remote_tags
+    res = runner.invoke(app, ["kit", "list"])
+    assert res.exit_code == 0, res.stdout
+    assert f"figures/fig.png at {head_sha[:7]}" in res.stdout
+    assert tag_name in res.stdout
+    res = runner.invoke(
+        app, ["kit", "bundle", "figures/fig.svg", "--no-record"]
+    )
+    assert res.exit_code == 0, res.stdout
+    assert len(calkit.kits.get_records()) == 1
+    # Changes elsewhere in the project, even to calkit.yaml, don't stop a
+    # calkit being created and recorded, but changes to what's in it do
+    ck_info = calkit.load_calkit_info()
+    ck_info["title"] = "New title"
+    ck_info["pipeline"]["stages"]["other"] = {
+        "kind": "command",
+        "environment": "_system",
+        "command": "echo hi > other.txt",
+        "outputs": ["other.txt"],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    with open("notes.md", "w") as f:
+        f.write("Notes\n")
+    subprocess.check_call(["git", "add", "notes.md"])
+    res = runner.invoke(app, ["kit", "bundle", "figures/fig.svg"])
+    assert res.exit_code == 0, res.stdout
+    assert "Recorded as tag kit/figures/fig.svg/" in res.stdout
+    kit = calkit.kits.read("fig.calkit.svg")
+    assert kit is not None
+    assert kit.manifest.source.uncommitted_paths == []
+    with open(".dvcignore", "a") as f:
+        f.write("# changed\n")
+    res = runner.invoke(app, ["kit", "bundle", "figures/fig.svg"])
+    assert res.exit_code != 0
+    assert "Uncommitted changes: .dvcignore" in res.stdout + str(res.stderr)
+    subprocess.check_call(
+        ["git", "checkout", "calkit.yaml", "dvc.yaml", ".dvcignore"]
+    )
+    subprocess.check_call(["git", "rm", "-q", "--cached", "notes.md"])
+    # Data that doesn't fit is left out and reported
+    res = runner.invoke(
+        app,
+        [
+            "kit",
+            "bundle",
+            "figures/fig.pdf",
+            "-o",
+            "small.pdf",
+            "--max-size",
+            "1KB",
+        ],
+    )
+    assert res.exit_code == 0, res.stdout
+    assert "Left out 4 files" in res.stdout
+    res = runner.invoke(
+        app, ["kit", "bundle", "figures/fig.pdf", "--max-size", "big"]
+    )
+    assert res.exit_code != 0
+    assert "Invalid size" in res.stdout + str(res.stderr)
+    # An out-of-date pipeline needs --force, and the calkit says so
+    with open("data/raw.csv", "a") as f:
+        f.write("1,1\n")
+    args = ["kit", "bundle", "figures/fig.png", "-o", "a.png"]
+    res = runner.invoke(app, args)
+    assert res.exit_code != 0
+    assert "Out of date: make" in res.stdout + str(res.stderr)
+    res = runner.invoke(app, [*args, "--force"])
+    assert res.exit_code == 0, res.stdout
+    kit = calkit.kits.read("a.png")
+    assert kit is not None
+    assert not kit.manifest.source.up_to_date
+    assert "isn't recorded" in res.stdout + str(res.stderr)
+    # Only the calkits created normally are recorded
+    paths = [r["artifact_path"] for r in calkit.kits.get_records()]
+    assert sorted(paths) == [
+        "figures/fig.pdf",
+        "figures/fig.png",
+        "figures/fig.svg",
+    ]
+    subprocess.check_call(["dvc", "checkout", "-q", "--force", "data/raw.csv"])
+    # Copied to the clipboard as a file
+    copied = []
+    monkeypatch.setattr(
+        "calkit.kits.copy_to_clipboard", lambda path: copied.append(path)
+    )
+    res = runner.invoke(
+        app, ["kit", "bundle", "figures/fig.svg", "--to-clipboard"]
+    )
+    assert res.exit_code == 0, res.stdout
+    assert "Couldn't record" not in res.stdout + str(res.stderr)
+    assert "Recorded as tag kit/figures/fig.svg/" in res.stdout
+    assert copied == ["fig.calkit.svg"]
+    assert "Copied fig.calkit.svg to clipboard" in res.stdout
+    # Modifying the DVC-tracked artifact itself marks it uncommitted so
+    # --force leaves it unrecorded
+    with open("figures/fig.png", "ab") as f:
+        f.write(b"x")
+    res = runner.invoke(
+        app, ["kit", "bundle", "figures/fig.png", "-o", "mod.png", "--force"]
+    )
+    assert res.exit_code == 0, res.stdout
+    mod_kit = calkit.kits.read("mod.png")
+    assert mod_kit is not None
+    assert "figures/fig.png" in mod_kit.manifest.source.uncommitted_paths
+    assert "isn't recorded" in res.stdout + str(res.stderr)
+    subprocess.check_call(
+        ["dvc", "checkout", "-q", "--force", "figures/fig.png"]
+    )
+    # Only what a stage makes can carry a calkit
+    res = runner.invoke(app, ["kit", "bundle", "scripts/make.py"])
+    assert res.exit_code != 0
+    assert "No pipeline stage makes" in res.stdout + str(res.stderr)
+
+
+def test_unbundle_run_open(kit_project, tmp_path, monkeypatch):
+    kit_path = str(tmp_path / "fig.png")
+    calkit.kits.write_copy("figures/fig.png", kit_path, up_to_date=True)
+    small_path = str(tmp_path / "small.png")
+    calkit.kits.write_copy(
+        "figures/fig.png", small_path, up_to_date=True, max_size=1000
+    )
+    # Inputs left out can be pulled from the project's DVC remote when
+    # rerunning, even though the unbundled repo has no Git origin
+    dvc_remote = tmp_path / "dvc-remote"
+    dvc_remote.mkdir()
+    subprocess.check_call(
+        ["dvc", "remote", "add", "-d", "local", str(dvc_remote)]
+    )
+    subprocess.check_call(["dvc", "push", "-q", "data/raw.csv"])
+    pullable_path = str(tmp_path / "pullable.png")
+    calkit.kits.write_copy(
+        "figures/fig.png", pullable_path, up_to_date=True, max_size=1000
+    )
+    os.chdir(tmp_path)
+    # Unbundling defaults to the project's name, and says what's missing
+    res = runner.invoke(app, ["kit", "unbundle", small_path])
+    assert res.exit_code == 0, res.stdout
+    assert "Unbundled into kit-test" in res.stdout
+    assert "Left out of calkit: 4 files" in res.stdout
+    assert os.path.isfile("kit-test/figures/fig.png")
+    assert os.path.isfile("kit-test/scripts/make.py")
+    assert not os.path.exists("kit-test/data/raw.csv")
+    res = runner.invoke(app, ["kit", "unbundle", small_path])
+    assert res.exit_code != 0
+    assert "isn't empty" in res.stdout + str(res.stderr)
+    res = runner.invoke(app, ["kit", "unbundle", "kit-test/scripts/make.py"])
+    assert res.exit_code != 0
+    assert "has no calkit" in res.stdout + str(res.stderr)
+    # Opening opens the unbundled project in an editor, or the original on
+    # the hub at the commit it came from, unbundling it into a folder for
+    # that calkit rather than here
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    kit_sha256 = hashlib.sha256(calkit.kits.read(small_path).kit).hexdigest()
+    small_kit_dir = str(
+        home / "calkit" / "kits" / f"kit-test-{kit_sha256[:7]}"
+    )
+    opened = []
+    monkeypatch.setattr(
+        "calkit.cli.open_.open_project",
+        lambda **kwargs: opened.append(kwargs),
+    )
+    res = runner.invoke(app, ["kit", "open", small_path])
+    assert res.exit_code == 0, res.stdout
+    assert opened[-1]["checkout"] == small_kit_dir
+    assert os.path.isfile(os.path.join(small_kit_dir, "calkit.yaml"))
+    res = runner.invoke(app, ["kit", "open", small_path])
+    assert res.exit_code == 0, res.stdout
+    assert "Unbundled" not in res.stdout
+    assert opened[-1]["file_path"] == "figures/fig.png"
+    launched = []
+    monkeypatch.setattr(
+        "calkit.cli.kit.typer.launch", lambda url: launched.append(url)
+    )
+    res = runner.invoke(app, ["kit", "open", small_path, "--hub"])
+    assert res.exit_code == 0, res.stdout
+    assert launched[-1].startswith(
+        calkit.hub.get_hub_url().rstrip("/")
+        + "/someone/kit-test/files?path=figures%2Ffig.png&ref="
+    )
+    # Running reruns the pipeline and checks the file comes out the same
+    res = runner.invoke(app, ["kit", "run", kit_path, "rerun", "--yes"])
+    assert res.exit_code == 0, res.stdout
+    assert "Reproduced figures/fig.png: identical" in res.stdout
+    # By default, it reuses the folder for that calkit, but not one given
+    for _ in range(2):
+        res = runner.invoke(app, ["kit", "run", kit_path, "--yes"])
+        assert res.exit_code == 0, res.stdout
+        assert "Reproduced figures/fig.png: identical" in res.stdout
+    assert "Using calkit unbundled in" in res.stdout
+    res = runner.invoke(app, ["kit", "run", kit_path, "rerun", "--yes"])
+    assert res.exit_code != 0
+    assert "isn't empty" in res.stdout + str(res.stderr)
+    # Without --yes on a non-TTY, it previews stages and stops before pulling
+    res = runner.invoke(app, ["kit", "run", pullable_path, "no-yes"])
+    assert res.exit_code != 0
+    assert "Rerun with --yes" in res.stdout + str(res.stderr)
+    assert not os.path.exists("no-yes/data/raw.csv")
+    # With --yes, it pulls the missing input via DVC and reproduces the file
+    res = runner.invoke(
+        app, ["kit", "run", pullable_path, "rerun-pulled", "--yes"]
+    )
+    assert res.exit_code == 0, res.stdout
+    assert "Reproduced figures/fig.png: identical" in res.stdout
+    # It can't without inputs that weren't included and can't be pulled
+    res = runner.invoke(
+        app, ["kit", "run", small_path, "rerun-small", "--yes"]
+    )
+    assert res.exit_code != 0
+    assert "Missing inputs: data/raw.csv" in res.stdout + str(res.stderr)
+    # Tampering with the shared artifact's bytes is caught on rerun, though
+    # the pipeline reproduces what the calkit was created from
+    with open(kit_path, "rb") as f:
+        kit_bytes = f.read()
+    with open("tampered.png", "wb") as f:
+        f.write(kit_bytes[:16] + b"\x00\x00\x01\x00" + kit_bytes[20:])
+    res = runner.invoke(
+        app, ["kit", "run", "tampered.png", "rerun-tampered", "--yes"]
+    )
+    assert res.exit_code != 0
+    assert "tampered.png was modified since" in res.stdout + str(res.stderr)
+    # A file that comes out different from the shared one is reported
+    kit = calkit.kits.read(kit_path)
+    assert kit is not None
+    changed = kit.manifest.model_copy(deep=True)
+    changed.artifact.sha256 = "0" * 64
+    changed.source.name = "../evil"
+    with zipfile.ZipFile(io.BytesIO(kit.kit)) as z:
+        entries = {name: (z.read(name), False) for name in z.namelist()}
+    entries[calkit.kits.MANIFEST_NAME] = (
+        changed.model_dump_json(by_alias=True).encode(),
+        False,
+    )
+    with open("changed.png", "wb") as f:
+        f.write(
+            calkit.kits.embed(
+                kit.artifact, "changed.png", calkit.kits.write_zip(entries)
+            )
+        )
+    res = runner.invoke(app, ["kit", "run", "changed.png", "--yes"])
+    assert res.exit_code != 0
+    # Its name, from whoever made it, only names a folder here
+    assert f"Unbundled into {home / 'calkit' / 'kits' / 'evil-'}" in res.stdout
+    assert "differs from the shared file" in res.stdout + str(res.stderr)
+    # Its source project is found on this machine, saying what's changed
+    # there since, or cloned if it isn't here
+    project_dir = os.path.realpath(".")
+    monkeypatch.setattr(
+        "calkit.get_project_checkouts",
+        lambda name, owner="", warn=None: (
+            {project_dir: owner}
+            if (owner, name) == ("someone", "kit-test")
+            else {}
+        ),
+    )
+    res = runner.invoke(app, ["kit", "open", kit_path, "--source"])
+    assert res.exit_code == 0, res.stdout
+    assert "From this project, at HEAD" in res.stdout
+    assert "No newer figures/fig.png here" in res.stdout
+    assert opened[-1]["checkout"] == project_dir
+    assert opened[-1]["file_path"] == "figures/fig.png"
+    res = runner.invoke(app, ["kit", "describe", kit_path])
+    assert res.exit_code == 0, res.stdout
+    assert "From this project, at HEAD" in res.stdout
+    monkeypatch.setattr(
+        "calkit.get_project_checkouts", lambda *args, **kwargs: {}
+    )
+    res = runner.invoke(app, ["kit", "open", kit_path, "--source", "--yes"])
+    assert res.exit_code == 0, res.stdout
+    assert opened[-1]["project"] == "someone/kit-test"
+    assert opened[-1]["yes"]
+    hub = urllib.parse.urlparse(calkit.hub.get_hub_url())
+    assert opened[-1]["hub"] == f"{hub.scheme}://{hub.netloc}"
+    res = runner.invoke(app, ["kit", "open", kit_path, "--source", "--hub"])
+    assert res.exit_code != 0

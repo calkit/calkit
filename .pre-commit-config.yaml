@@ -55,11 +55,11 @@ repos:
   - repo: local
     hooks:
       - id: generate-schema
-        name: generate calkit.yaml schema
+        name: generate calkit.yaml and kit schemas
         language: system
-        entry: bash -c 'uv run calkit describe schema -o docs/schemas/calkit.json && cp docs/schemas/calkit.json vscode-ext/schemas/calkit.json'
+        entry: bash -c 'uv run calkit describe schema -o docs/schemas/calkit.json && cp docs/schemas/calkit.json vscode-ext/schemas/calkit.json && uv run calkit describe schema --kit -o docs/schemas/calkit-kit.json'
         pass_filenames: false
-        files: ^calkit/models/.*\.py$
+        files: ^calkit/(models/.*|kits)\.py$
       - id: generate-docs-references
         name: generate docs references
         language: system

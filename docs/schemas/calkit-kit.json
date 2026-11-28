@@ -1,0 +1,258 @@
+{
+  "$defs": {
+    "KitArtifact": {
+      "properties": {
+        "path": {
+          "description": "Path of the artifact in the project.",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "description": "SHA-256 of the artifact, without the calkit.",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "size": {
+          "description": "Size in bytes, without the calkit.",
+          "title": "Size",
+          "type": "integer"
+        },
+        "stage": {
+          "description": "Name of the pipeline stage that makes it.",
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "sha256",
+        "stage"
+      ],
+      "title": "KitArtifact",
+      "type": "object"
+    },
+    "KitFile": {
+      "properties": {
+        "included": {
+          "description": "Whether the file is in the calkit, under 'project/'. Files left out can be fetched from the project's DVC remote, or remade by running the pipeline.",
+          "title": "Included",
+          "type": "boolean"
+        },
+        "md5": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "DVC's MD5 of the file, for fetching it from DVC storage.",
+          "title": "Md5"
+        },
+        "path": {
+          "description": "Path in the project.",
+          "title": "Path",
+          "type": "string"
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SHA-256 of the file, if it's in the calkit.",
+          "title": "Sha256"
+        },
+        "size": {
+          "description": "Size in bytes.",
+          "title": "Size",
+          "type": "integer"
+        },
+        "storage": {
+          "description": "Where the project keeps the file.",
+          "enum": [
+            "git",
+            "dvc"
+          ],
+          "title": "Storage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "size",
+        "storage",
+        "included"
+      ],
+      "title": "KitFile",
+      "type": "object"
+    },
+    "KitProvenanceGap": {
+      "properties": {
+        "message": {
+          "description": "How it leads to the artifact.",
+          "title": "Message",
+          "type": "string"
+        },
+        "path": {
+          "description": "Path nothing records the origin of.",
+          "title": "Path",
+          "type": "string"
+        },
+        "unchecked": {
+          "default": false,
+          "description": "Whether it's recorded as imported, but from somewhere nobody else can check, e.g., a folder on someone's machine.",
+          "title": "Unchecked",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "message"
+      ],
+      "title": "KitProvenanceGap",
+      "type": "object"
+    },
+    "KitSource": {
+      "properties": {
+        "commit_sha": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git commit the calkit was made from.",
+          "title": "Commit Sha"
+        },
+        "git_remotes": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Git remote URLs by name, without credentials.",
+          "title": "Git Remotes",
+          "type": "object"
+        },
+        "hub_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "URL of the project's page on a Calkit hub, if it names one, where '/files?path=PATH&ref=COMMIT_SHA' shows a file at a commit.",
+          "title": "Hub Url"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the project.",
+          "title": "Name"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Title of the project.",
+          "title": "Title"
+        },
+        "uncommitted_paths": {
+          "description": "Files in the calkit with changes not in that commit.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Uncommitted Paths",
+          "type": "array"
+        },
+        "up_to_date": {
+          "description": "Whether the artifact's stage, and every stage upstream of it, was up to date when the calkit was made.",
+          "title": "Up To Date",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "up_to_date"
+      ],
+      "title": "KitSource",
+      "type": "object"
+    }
+  },
+  "$id": "https://docs.calkit.org/schemas/calkit-kit.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The calkit-kit.json at the root of a calkit, the ZIP embedded in an artifact holding what made it. See https://docs.calkit.org/kits",
+  "properties": {
+    "$schema": {
+      "default": "https://docs.calkit.org/schemas/calkit-kit.json",
+      "description": "URL of this schema, which says where to learn more.",
+      "title": "$Schema",
+      "type": "string"
+    },
+    "artifact": {
+      "$ref": "#/$defs/KitArtifact"
+    },
+    "created_with": {
+      "description": "Tool and version that made it.",
+      "title": "Created With",
+      "type": "string"
+    },
+    "files": {
+      "description": "Files the artifact's pipeline uses, in the calkit or not.",
+      "items": {
+        "$ref": "#/$defs/KitFile"
+      },
+      "title": "Files",
+      "type": "array"
+    },
+    "kit_version": {
+      "default": 1,
+      "description": "Calkit format version.",
+      "title": "Kit Version",
+      "type": "integer"
+    },
+    "provenance_gaps": {
+      "description": "Inputs upstream of the artifact that no stage makes and that have no recorded origin, e.g., an import or who created them.",
+      "items": {
+        "$ref": "#/$defs/KitProvenanceGap"
+      },
+      "title": "Provenance Gaps",
+      "type": "array"
+    },
+    "source": {
+      "$ref": "#/$defs/KitSource"
+    }
+  },
+  "required": [
+    "created_with",
+    "artifact",
+    "source",
+    "files"
+  ],
+  "title": "Calkit manifest",
+  "type": "object"
+}

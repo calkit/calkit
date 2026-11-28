@@ -2842,3 +2842,45 @@ def test_new_comment(tmp_dir):
             capture_output=True,
         )
         assert res.returncode != 0, args
+
+
+def test_new_release_kit(kit_project):
+    import calkit.kits
+
+    # A release can carry a calkit, but not of the whole project, and not
+    # with --pipeline as well
+    res = runner.invoke(
+        app,
+        [
+            "new",
+            "release",
+            "-n",
+            "v1",
+            "--internal",
+            "--no-push",
+            "--kit",
+            "figures/fig.svg",
+        ],
+    )
+    assert res.exit_code == 0, res.stdout
+    stored = [
+        os.path.join(".calkit/releases/v1", f)
+        for f in os.listdir(".calkit/releases/v1")
+        if f.endswith(".svg")
+    ]
+    assert len(stored) == 1
+    kit = calkit.kits.read(stored[0])
+    assert kit is not None
+    assert kit.artifact_unchanged
+    for args in [
+        ["--kit", "."],
+        ["--kit", "--pipeline", "figures/fig.svg"],
+        ["--kit", "data/raw.csv"],
+        ["--kit", "figures"],
+        ["--kit", "figures/missing.png"],
+    ]:
+        res = runner.invoke(
+            app,
+            ["new", "release", "-n", "v2", "--internal", "--no-push", *args],
+        )
+        assert res.exit_code != 0

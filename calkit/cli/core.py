@@ -46,6 +46,23 @@ class AliasGroup(TyperGroup):
         return default_name
 
 
+class DefaultCommandGroup(AliasGroup):
+    """AliasGroup that runs ``default_command`` when the first argument
+    isn't one of its commands, e.g., so ``calkit describe PATH`` describes a
+    path. Subclasses set ``default_command``.
+    """
+
+    default_command = ""
+
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        # Before the group parses, since options for the default command,
+        # e.g., 'calkit describe --json PATH', aren't the group's
+        first = next((a for a in args if not a.startswith("-")), None)
+        if first is not None and self.get_command(ctx, first) is None:
+            args = [self.default_command, *args]
+        return super().parse_args(ctx, args)
+
+
 class OptionalValueCommand(TyperCommand):
     """TyperCommand allowing certain options to be passed without a value.
 

@@ -75,10 +75,11 @@ test-docs: sync-docs ## Test if documentation can be built without warnings or e
 	@uv run mkdocs build -s
 
 .PHONY: schema
-schema: ## Generate the published JSON schema for calkit.yaml.
+schema: ## Generate the published JSON schemas for calkit.yaml and kits.
 	@echo "🚀 Generating calkit.yaml JSON schema"
 	@uv run calkit describe schema -o docs/schemas/calkit.json
 	@cp docs/schemas/calkit.json vscode-ext/schemas/calkit.json
+	@uv run calkit describe schema --kit -o docs/schemas/calkit-kit.json
 
 .PHONY: sync-docs
 sync-docs: schema ## Sync documentation content from docs/*.md into README.md.

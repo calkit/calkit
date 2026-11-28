@@ -41,8 +41,9 @@
 | [`notebooks\|nb`](#command-group-notebooks-nb)   | Work with computational notebooks.                                                                           |
 | [`list\|ls`](#command-group-list-ls)             | List Calkit objects.                                                                                         |
 | [`show`](#command-group-show)                    | Show Calkit objects.                                                                                         |
-| [`describe\|desc`](#command-group-describe-desc) | Describe things.                                                                                             |
+| [`describe\|desc`](#command-group-describe-desc) | Describe things, or a file with 'calkit describe PATH'.                                                      |
 | [`import`](#command-group-import)                | Import objects.                                                                                              |
+| [`kit`](#command-group-kit)                      | Share figures and documents that carry what made them (calkits).                                             |
 | [`office`](#command-group-office)                | Work with Microsoft Office.                                                                                  |
 | [`open`](#command-group-open)                    | Open things.                                                                                                 |
 | [`browser-link`](#command-group-browser-link)    | Link the browser extension to Calkit on this machine.                                                        |
@@ -1835,6 +1836,7 @@ Options:
 | `--description`, `--desc` | str       | no       |         | A description of the release. Will be auto-generated if not provided.                                                                                                                                 |
 | `--date`                  | str       | no       |         | Release date. Will default to today.                                                                                                                                                                  |
 | `--pipeline`              | boolean   | no       | False   | Include everything needed to reproduce the released path, i.e., the pipeline, its lock file, and the stages, inputs, and environments the path depends on. Stages unrelated to the path are left out. |
+| `--kit`                   | boolean   | no       | False   | Embed a calkit in the released file (what makes it, so it can be unbundled into a project); see 'calkit kit bundle'.                                                                                  |
 | `--no-docker-images`      | boolean   | no       | False   | Do not archive the project's Docker images in the release.                                                                                                                                            |
 | `--dry-run`               | boolean   | no       | False   | Only print actions that would be taken but don't take them.                                                                                                                                           |
 | `--no-commit`             | boolean   | no       | False   | Do not commit changes to Git repo.                                                                                                                                                                    |
@@ -2756,7 +2758,7 @@ Options:
 
 ### `calkit describe|desc`
 
-Describe things.
+Describe things, or a file with 'calkit describe PATH'.
 
 | Command                                                             | Description                                                        |
 | ------------------------------------------------------------------- | ------------------------------------------------------------------ |
@@ -2766,6 +2768,7 @@ Describe things.
 | [`subprojects`](#subcommand-describe-desc-subprojects)              | Describe subprojects, including nested ones.                       |
 | [`storage`](#subcommand-describe-desc-storage)                      | Describe project's Git and DVC storage.                            |
 | [`schema`](#subcommand-describe-desc-schema)                        | Print the JSON schema for calkit.yaml.                             |
+| [`artifact`](#subcommand-describe-desc-artifact)                    | Describe a file, what made it, and whether it's reproducible.      |
 
 <a id="subcommand-describe-desc-system"></a>
 
@@ -2879,9 +2882,36 @@ calkit describe|desc schema [OPTIONS]
 
 Options:
 
-| Option           | Type | Required | Default | Description                                               |
-| ---------------- | ---- | -------- | ------- | --------------------------------------------------------- |
-| `--output`, `-o` | str  | no       |         | Path at which to write the schema instead of printing it. |
+| Option           | Type    | Required | Default | Description                                               |
+| ---------------- | ------- | -------- | ------- | --------------------------------------------------------- |
+| `--output`, `-o` | str     | no       |         | Path at which to write the schema instead of printing it. |
+| `--kit`          | boolean | no       | False   | Print the schema for calkit manifests instead.            |
+
+<a id="subcommand-describe-desc-artifact"></a>
+
+#### `calkit describe|desc artifact`
+
+Describe a file, what made it, and whether it's reproducible.
+
+Says what kind of artifact it is, which stage makes it, whether that's up to date, and which inputs have no recorded origin. Reads the calkit embedded in it, if it has one, so this works for a file shared from another project; otherwise, describes it as part of this project. 'calkit describe PATH' is short for this.
+
+Usage:
+
+```text
+calkit describe|desc artifact [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description     |
+| -------- | ---- | -------- | ------- | --------------- |
+| `path`   | str  | yes      |         | Path of a file. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description    |
+| -------- | ------- | -------- | ------- | -------------- |
+| `--json` | boolean | no       | False   | Print as JSON. |
 
 <a id="command-group-import"></a>
 
@@ -3048,6 +3078,178 @@ Options:
 | `--name-not-like` | list[str] | no       |         | Exclude names matching pattern.                                                      |
 | `--storage`       | str       | no       |         | Storage backend to use (Git or DVC). If not specified, will be chosen based on size. |
 | `--no-commit`     | boolean   | no       | False   | Do not commit changes to project.                                                    |
+
+<a id="command-group-kit"></a>
+
+### `calkit kit`
+
+Share figures and documents that carry what made them (calkits).
+
+| Command                                | Description                                                                                                               |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| [`bundle`](#subcommand-kit-bundle)     | Write a copy of a figure or document with a calkit embedded.                                                              |
+| [`unbundle`](#subcommand-kit-unbundle) | Unbundle the calkit embedded in a file into a project.                                                                    |
+| [`run`](#subcommand-kit-run)           | Unbundle the calkit embedded in a file, rerun its pipeline, and check the file comes out the same.                        |
+| [`open`](#subcommand-kit-open)         | Open the project a file's calkit came from.                                                                               |
+| [`describe`](#subcommand-kit-describe) | Describe a file's calkit: what made it, whether it changed, and, in the project it came from, what's changed there since. |
+| [`list`](#subcommand-kit-list)         | List the calkits bundled from this project, newest first.                                                                 |
+
+<a id="subcommand-kit-bundle"></a>
+
+#### `calkit kit bundle`
+
+Write a copy of a figure or document with a calkit embedded.
+
+The calkit holds what makes the file (stages, scripts, environments, and data that fits) so anyone with the copy can see what made it with 'calkit describe', and unbundle or rerun it with 'calkit kit unbundle' or 'calkit kit run'. Works with PNG, PDF, SVG, and HTML files.
+
+It's recorded as a Git tag at the commit it came from, which is pushed, so 'calkit kit list' shows what's been shared and the commit stays available.
+
+Usage:
+
+```text
+calkit kit bundle [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description                            |
+| -------- | ---- | -------- | ------- | -------------------------------------- |
+| `path`   | str  | yes      |         | Path of a figure or document to share. |
+
+Options:
+
+| Option                 | Type    | Required | Default | Description                                                                                                                                   |
+| ---------------------- | ------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--output`, `-o`       | str     | no       |         | Where to write the copy; defaults to NAME.calkit.EXT here.                                                                                    |
+| `--max-size`           | str     | no       |         | Largest the calkit may grow, e.g., 500KB or 20MB; data that doesn't fit is left out. Defaults to the file's size or 1MB, whichever is bigger. |
+| `--no-data`            | boolean | no       | False   | Leave out all data, so the calkit holds only the recipe.                                                                                      |
+| `--force`, `-f`        | boolean | no       | False   | Bundle it even if the pipeline is out of date or there are uncommitted changes, which leave it unrecorded.                                    |
+| `--no-record`          | boolean | no       | False   | Don't record it as a Git tag, or push that tag.                                                                                               |
+| `--to-clipboard`, `-c` | boolean | no       | False   | Copy it to the clipboard, to paste into a chat or email.                                                                                      |
+
+<a id="subcommand-kit-unbundle"></a>
+
+#### `calkit kit unbundle`
+
+Unbundle the calkit embedded in a file into a project.
+
+The project holds what makes the file, committed to a new Git repo with the original project's remote as 'upstream'.
+
+Usage:
+
+```text
+calkit kit unbundle PATH [DEST-DIR]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                      |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------------- |
+| `path`     | str  | yes      |         | Path of a file with a calkit.                                    |
+| `dest_dir` | str  | no       |         | Directory for the project; defaults to the project's name, here. |
+
+<a id="subcommand-kit-run"></a>
+
+#### `calkit kit run`
+
+Unbundle the calkit embedded in a file, rerun its pipeline, and check the file comes out the same.
+
+Inputs left out of the calkit are pulled from the original project's storage first, which needs access to it. The pipeline is code, so look at what it runs before running a calkit from someone you don't trust.
+
+Usage:
+
+```text
+calkit kit run [OPTIONS] PATH [DEST-DIR]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                          |
+| ---------- | ---- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `path`     | str  | yes      |         | Path of a file with a calkit.                                                        |
+| `dest_dir` | str  | no       |         | Directory to unbundle it into; defaults to ~/calkit/kits/NAME-HASH, reused if there. |
+
+Options:
+
+| Option        | Type    | Required | Default | Description                            |
+| ------------- | ------- | -------- | ------- | -------------------------------------- |
+| `--yes`, `-y` | boolean | no       | False   | Run without asking first what it runs. |
+
+<a id="subcommand-kit-open"></a>
+
+#### `calkit kit open`
+
+Open the project a file's calkit came from.
+
+Unbundles the calkit, unless that's been done already, and opens it in the default editor. With '--source', opens the original project instead, finding it on this machine or cloning it, and says what's changed there since, e.g., whether the file has been remade. With '--hub', opens the original project on the hub at the commit the calkit came from.
+
+Usage:
+
+```text
+calkit kit open [OPTIONS] PATH [DEST-DIR]
+```
+
+Arguments:
+
+| Argument   | Type | Required | Default | Description                                                                              |
+| ---------- | ---- | -------- | ------- | ---------------------------------------------------------------------------------------- |
+| `path`     | str  | yes      |         | Path of a file with a calkit.                                                            |
+| `dest_dir` | str  | no       |         | Directory to unbundle it into, if it isn't already; defaults to ~/calkit/kits/NAME-HASH. |
+
+Options:
+
+| Option         | Type    | Required | Default | Description                                                                                                 |
+| -------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------- |
+| `--hub`        | boolean | no       | False   | Open its project on the hub, at the commit it came from.                                                    |
+| `--source`     | boolean | no       | False   | Open the project it came from, on this machine or cloned into ~/calkit, and say what's changed there since. |
+| `--yes`, `-y`  | boolean | no       | False   | With --source, clone it without asking if it isn't here.                                                    |
+| `--with`, `-w` | str     | no       |         | Editor to open it with instead of the default.                                                              |
+
+<a id="subcommand-kit-describe"></a>
+
+#### `calkit kit describe`
+
+Describe a file's calkit: what made it, whether it changed, and, in the project it came from, what's changed there since.
+
+Same as 'calkit describe PATH'.
+
+Usage:
+
+```text
+calkit kit describe [OPTIONS] PATH
+```
+
+Arguments:
+
+| Argument | Type | Required | Default | Description     |
+| -------- | ---- | -------- | ------- | --------------- |
+| `path`   | str  | yes      |         | Path of a file. |
+
+Options:
+
+| Option   | Type    | Required | Default | Description    |
+| -------- | ------- | -------- | ------- | -------------- |
+| `--json` | boolean | no       | False   | Print as JSON. |
+
+<a id="subcommand-kit-list"></a>
+
+#### `calkit kit list`
+
+List the calkits bundled from this project, newest first.
+
+Read from the tags 'calkit kit bundle' records, so fetch tags first, e.g., with 'git fetch --tags', to see those others created.
+
+Usage:
+
+```text
+calkit kit list [OPTIONS]
+```
+
+Options:
+
+| Option   | Type    | Required | Default | Description    |
+| -------- | ------- | -------- | ------- | -------------- |
+| `--json` | boolean | no       | False   | Print as JSON. |
 
 <a id="command-group-office"></a>
 

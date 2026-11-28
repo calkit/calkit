@@ -8,6 +8,17 @@ The archived release should then be cited in the article
 so readers can follow the citation back to the project
 files in order to reproduce or reuse the results.
 
+<!-- TODO: needs human review -->
+
+To share one figure or document along the way,
+e.g., in a chat or email,
+a [kit](kits.md) is lighter:
+a copy of the file that carries what made it.
+Each kit is recorded as a Git tag at the commit it came from,
+so it's clear which version of the project made it
+and what's changed since,
+with nothing to archive.
+
 ## Integrating with Zenodo
 
 Calkit can archive whole projects or individual artifacts to
@@ -250,6 +261,12 @@ those are checked first, before anything is archived.
 
     The pipeline must be up-to-date before releasing,
     since the release records the state that produced the artifact.
+
+<!-- TODO: needs human review -->
+
+To release the artifact as a single file that carries what makes it,
+use `--kit` instead, which embeds a [calkit](kits.md) in the released
+copy.
 
 ## Releasing to CaltechDATA
 

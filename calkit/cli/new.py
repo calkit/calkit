@@ -3849,6 +3849,16 @@ def new_release(
             ),
         ),
     ] = False,
+    embed_kit: Annotated[
+        bool,
+        typer.Option(
+            "--kit",
+            help=(
+                "Embed a calkit in the released file (what makes it, so it "
+                "can be unbundled into a project); see 'calkit kit bundle'."
+            ),
+        ),
+    ] = False,
     no_docker_images: Annotated[
         bool,
         typer.Option(
@@ -3940,6 +3950,7 @@ def new_release(
     """Create a new release."""
     import dotenv
 
+    import calkit.kits
     import calkit.pipeline
 
     if to is None:
@@ -4026,7 +4037,7 @@ def new_release(
     if path != ".":
         stage_name = calkit.pipeline.get_stage_for_output(path, ck_info)
         if stage_name is None:
-            if include_pipeline:
+            if include_pipeline or embed_kit:
                 raise_error(
                     f"No pipeline stage produces '{path}', "
                     "so there is no pipeline to release along with it"
@@ -4034,10 +4045,22 @@ def new_release(
         else:
             targets = [stage_name]
             pipeline_stage = stage_name
+    elif embed_kit:
+        raise_error("Only a file can carry a calkit, not a project release")
     elif include_pipeline:
         # A project release carries the whole pipeline already
         typer.echo("Project releases already include the pipeline")
         include_pipeline = False
+    if embed_kit and include_pipeline:
+        raise_error("Use --kit or --pipeline, not both")
+    if embed_kit:
+        if not os.path.isfile(path):
+            raise_error(f"Only a file can carry a calkit: {path}")
+        with open(path, "rb") as f:
+            try:
+                calkit.kits.get_format(f.read(), path)
+            except ValueError as e:
+                raise_error(str(e))
     # A release that carries its pipeline is checked by running it, which
     # needs the project's requirements met, so check them as 'calkit run'
     # does before anything slow, like building environments or archiving.
@@ -4168,6 +4191,14 @@ def new_release(
                         )
                     except Exception as e:
                         raise_error(str(e))
+            elif embed_kit:
+                typer.echo(f"Embedding calkit in {stored_path_posix}")
+                try:
+                    calkit.kits.write_copy(
+                        path, stored_path, up_to_date=True, ck_info=ck_info
+                    )
+                except ValueError as e:
+                    raise_error(str(e))
             else:
                 typer.echo(f"Copying {path} to {stored_path_posix}")
                 shutil.copy2(path, stored_path)
@@ -4230,8 +4261,22 @@ def new_release(
             # TODO: Handle directories, e.g., datasets
             if not os.path.isfile(path):
                 raise_error("Single artifact releases must be a single file")
-            typer.echo(f"Copying {path} into {release_files_dir}")
-            shutil.copy2(path, release_files_dir)
+            if embed_kit:
+                typer.echo(f"Embedding calkit in copy in {release_files_dir}")
+                try:
+                    calkit.kits.write_copy(
+                        path,
+                        os.path.join(
+                            release_files_dir, os.path.basename(path)
+                        ),
+                        up_to_date=True,
+                        ck_info=ck_info,
+                    )
+                except ValueError as e:
+                    raise_error(str(e))
+            else:
+                typer.echo(f"Copying {path} into {release_files_dir}")
+                shutil.copy2(path, release_files_dir)
             # Check that this artifact actually exists
             artifact_key = (
                 release_kind + "s"

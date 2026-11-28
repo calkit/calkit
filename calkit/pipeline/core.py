@@ -704,11 +704,14 @@ def get_stage_items(
 
     That's the stage alone, keyed by its name, unless it iterates and its
     ``environment`` or ``requirements`` use its values, e.g.,
-    ``environment: "{env}"`` or ``- "{engine}"``. Then it's each item, keyed
-    by the name DVC runs it under, e.g., ``stage@word``, with those values
-    filled in.
+    ``environment: "{env}"`` or ``- "{engine}"``, or its script does, when
+    it runs in the environment the script declares. Then it's each item,
+    keyed by the name DVC runs it under, e.g., ``stage@word``, with those
+    values filled in.
     """
     import json
+
+    import calkit.environments.inline
 
     def check_quoted(obj: Any, field: str) -> None:
         # YAML reads an unquoted {var} as a mapping, {var: null}, which
@@ -739,9 +742,12 @@ def get_stage_items(
         arg_names |= set(
             arg_name if isinstance(arg_name, list) else [arg_name]
         )
+    field_names = ["environment", "requirements"]
+    if calkit.environments.inline.get_stage_script_path(stage) is not None:
+        field_names.append("script_path")
     fields = {
         field: stage[field]
-        for field in ("environment", "requirements")
+        for field in field_names
         if stage.get(field) is not None
     }
     for field, value in fields.items():
@@ -1088,6 +1094,7 @@ def get_gated_stages(
     import sys
 
     import calkit.environments as envs_mod
+    import calkit.environments.inline
 
     if interactive is None:
         from calkit.core import is_tty
@@ -1321,6 +1328,10 @@ def get_gated_stages(
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )
+        # A script's own environment is checked by its path
+        script_path = calkit.environments.inline.get_stage_script_path(stage)
+        if script_path is not None:
+            env_names = [script_path]
         failed = [e for e in env_names if e in (failed_environments or {})]
         if failed:
             gated[name] = (failed_environments or {})[failed[0]]

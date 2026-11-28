@@ -652,6 +652,55 @@ since it describes a different machine, not a problem with this one.
 Since the stages' results may then depend on which machine ran them,
 pin the machine with a [`system` environment](#system) when that matters.
 
+<!-- TODO: needs human review -->
+
+#### Scripts that declare their own
+
+A Python script can say what it needs in a comment block at its top,
+known as
+[inline script metadata](https://docs.astral.sh/uv/guides/scripts/#declaring-script-dependencies):
+
+```python
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "matplotlib>=3.10",
+# ]
+# ///
+import matplotlib.pyplot as plt
+```
+
+A `python-script` stage with no `environment` runs its script in that
+environment with uv, so the script needs no entry under `environments`:
+
+```yaml
+pipeline:
+  stages:
+    plot:
+      kind: python-script
+      script_path: scripts/plot.py
+      outputs:
+        - figures/plot.png
+```
+
+Calkit locks the script's environment in a file beside it,
+e.g., `scripts/plot.py.lock`, which should be committed,
+and keeps it up to date when the block changes.
+Only the stages whose scripts' blocks changed then rerun,
+unlike stages sharing one environment,
+which all rerun when anything in it changes.
+This needs [uv](https://docs.astral.sh/uv/) installed.
+
+The block has to say which Python it needs with `requires-python`,
+since otherwise the lock would only suit the version it was made with.
+Within that, the version comes from the nearest `.python-version` file,
+in the script's folder or those above it, up to the project's.
+A stage whose script has no block, or no `requires-python`,
+doesn't run, rather than running in whatever Python this machine has.
+Neither can a stage whose script another stage writes,
+since there's no lock for it until that stage has run,
+so give that one an `environment`.
+
 ### venv
 
 A `venv` environment,

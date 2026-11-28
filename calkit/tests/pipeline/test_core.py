@@ -139,7 +139,8 @@ def test_to_dvc():
     )
     assert env_lock in stage["deps"]
     # TODO: Test other stage types
-    # Test when user forgets to add an environment
+    # With no environment, the script's own is used, which it's checked to
+    # declare once it's there
     ck_info = {
         "environments": envs,
         "pipeline": {
@@ -154,8 +155,11 @@ def test_to_dvc():
             }
         },
     }
-    with pytest.raises(ValueError):
-        calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    stage = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)["get-data"]
+    assert stage["cmd"] == (
+        "uv run --locked --script something/my-cool-script.py"
+    )
+    assert "something/my-cool-script.py.lock" in stage["deps"]
     # Test that we can define inputs from stage outputs
     ck_info = {
         "environments": envs,
@@ -5279,6 +5283,23 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
             ck_info, stage_names=[item], interactive=False
         )
         assert set(gated) == expected
+    # A script's own environment failing to lock gates only stages running it
+    for name, wdir in [("inline", None), ("inline-wdir", "sub")]:
+        stages[name] = {"kind": "python-script", "script_path": "plot.py"}
+        if wdir is not None:
+            stages[name]["wdir"] = wdir
+    stages["inline-other"] = {
+        "kind": "python-script",
+        "script_path": "other.py",
+        "environment": None,
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=["inline", "inline-wdir", "inline-other"],
+        interactive=False,
+        failed_environments={os.path.join("sub", "plot.py"): "failed"},
+    )
+    assert gated == {"inline-wdir": "failed"}
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(

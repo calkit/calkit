@@ -4,7 +4,9 @@ Writes <run>/grade.json with four grades, each with a `pass` and details:
 
 - correct: the report's numbers match the task's reference end state, with
   stale numbers (should have changed, didn't) and unrequested changes
-  counted, plus the figure and the task's own checks
+  counted, plus the figure and the task's own checks, e.g., for add-site,
+  that the Methods count five sites, and how site E's re-entered
+  participants ended up in the analysis table
 - consistent: rerunning the project its own way changes nothing, the
   report's numbers agree with its results files, and the figure matches its
   analysis table
@@ -57,6 +59,11 @@ METHODS_AGES = {
     "undo": (60, 80),
     "stale-clone": (60, 85),
 }
+# How add-site's Methods may say the trial now has five sites
+METHODS_SITES = (
+    r"\b(?:five|fifth)\b|\bsite E\b"
+    r"|\bsites? A\s*(?:–|—|-|to|through)\s*E\b"
+)
 # Tasks that ask a question about the project rather than change it
 READ_ONLY = {"provenance", "regression"}
 N_PERTURB_DROP = 25
@@ -244,6 +251,58 @@ def check_new_answer(text: str, by_sex: dict) -> dict:
     }
 
 
+def check_site_e(table: Path, expected: dict) -> dict:
+    """How the analysis table holds site E's participants, given that four
+    were entered twice: `correct` (the reference's participants, each from
+    their latest entry), `duplicates-kept`, `first-entry-kept`, `missing`,
+    or `other`. Informational; the numbers decide `correct`.
+    """
+    site_e = expected["site_e"]
+    try:
+        df = pd.read_csv(table, dtype=str)
+    except Exception as e:
+        return {"handling": None, "error": str(e)[:200]}
+    if "participant_id" not in df:
+        return {"handling": None, "error": "no participant_id column"}
+    df["participant_id"] = df["participant_id"].str.strip().str.upper()
+    rows = df[df["participant_id"].str.startswith("E-", na=False)]
+    reference = [i for i in expected["participant_ids"] if i.startswith("E-")]
+    entries = {}
+    for pid, records in site_e["reentered"].items():
+        found = rows[rows["participant_id"] == pid]
+        if found.empty:
+            entries[pid] = "absent"
+            continue
+        kinds = set()
+        for _, row in found.iterrows():
+            for which in ["latest", "first"]:
+                if all(
+                    str(row.get(c)) == v for c, v in records[which].items()
+                ):
+                    kinds.add(which)
+                    break
+            else:
+                kinds.add("neither")
+        entries[pid] = "+".join(sorted(kinds))
+    if rows.empty:
+        handling = "missing"
+    elif rows["participant_id"].duplicated().any():
+        handling = "duplicates-kept"
+    elif any("first" in v for v in entries.values()):
+        handling = "first-entry-kept"
+    elif sorted(rows["participant_id"]) == reference:
+        handling = "correct"
+    else:
+        handling = "other"
+    return {
+        "handling": handling,
+        "n_rows": len(rows),
+        "n_participants": int(rows["participant_id"].nunique()),
+        "n_expected": len(reference),
+        "reentered": entries,
+    }
+
+
 def grade_distant(meta: dict, project: Path, expected: dict) -> dict | None:
     """Whether the main result typed into the conference abstract, far from
     the report, matches the task's reference; None if there's none.
@@ -364,6 +423,13 @@ def grade_correct(
         checks["distant"] = distant
     if task == "new-question":
         checks["new_answer"] = check_new_answer(text or "", expected["by_sex"])
+    if task == "add-site":
+        checks["methods_states_sites"] = bool(
+            re.search(METHODS_SITES, normalize(methods) or "", flags=re.I)
+        )
+        checks["site_e"] = check_site_e(
+            project / arms.ARMS[meta["arm"]]["table"], expected
+        )
     # Informational: which participants the analysis table holds
     table = project / arms.ARMS[meta["arm"]]["table"]
     try:
@@ -380,6 +446,7 @@ def grade_correct(
         and not FAILING & set(counts)
         and figure["match"]
         and checks.get("methods_states_ages", True)
+        and checks.get("methods_states_sites", True)
         and checks.get("new_answer", {"pass": True})["pass"]
         and (task != "distant-consumer" or bool(distant and distant["pass"]))
     )
@@ -533,12 +600,14 @@ def grade_damage(meta: dict, project: Path, run: Path) -> dict:
     for f in template:
         if not f.startswith("data/raw/") or final.get(f) == template[f]:
             continue
-        # A corrected file may replace the original if the original is kept
+        # A corrected file may replace the original, or a new site's rows
+        # be added to it, if the original is kept
         kept = (head is not None and history_ok) or template[f] in set(
             final.values()
         )
-        allowed = (
-            meta["task"] == "data-correction" and "participants" in f and kept
+        allowed = kept and (
+            (meta["task"] == "data-correction" and "participants" in f)
+            or (meta["task"] == "add-site" and f in final)
         )
         raw_changed.append(
             {
@@ -1016,6 +1085,10 @@ def grade(
             "distant": correct.get("checks", {})
             .get("distant", {})
             .get("pass"),
+            # add-site: how site E's re-entered participants were handled
+            "site_e": correct.get("checks", {})
+            .get("site_e", {})
+            .get("handling"),
             "consistent": consistent["pass"],
             "no_damage": damage["pass"],
             "traceable": traceable["pass"],

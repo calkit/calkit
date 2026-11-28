@@ -1,0 +1,1 @@
+Site E joined the trial. Its enrollment and session exports are in {incoming}/ (see the codebook). Add site E to the analysis and update everything that depends on it.

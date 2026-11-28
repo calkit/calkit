@@ -1,25 +1,29 @@
 #!/usr/bin/env bash
-# Build every arm's template and task 4's incoming file.
+# Build every arm's template and the files tasks hand agents.
 #
 # Builds the none arm as round 2 did (build/build_none.sh), the history arms
-# (messy, messy-git, make, calkit), and the Git arms' stale variants for
+# (messy, messy-git, make, make-hint, calkit), and the Git arms' stale
+# variants for
 # stale-clone, by replaying one research history in each
 # (build/build_history.py), with the Calkit arm's commands run by Calkit at
 # <calkit rev>. Builds outside the repo, so no Calkit or Git command sees the
 # research project around it, then archives the templates into one
 # deterministic .tar.gz, since they hold nested Git repos, and lists each
-# template's files and Git head in a JSON manifest.
+# template's files and Git head in a JSON manifest. calkit-hint starts
+# from calkit's template, so it has none of its own. Also writes task 4's
+# corrected participants file and site E's exports for add-site.
 #
 # Usage: build/build_templates.sh <calkit rev> <archive> <manifest>
-#     <incoming file>
+#     <incoming file> <site E dir>
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 REV="$1"
-mkdir -p "$(dirname "$2")" "$(dirname "$3")" "$(dirname "$4")"
+mkdir -p "$(dirname "$2")" "$(dirname "$3")" "$(dirname "$4")" "$5"
 ARCHIVE="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"
 MANIFEST="$(cd "$(dirname "$3")" && pwd)/$(basename "$3")"
 INCOMING="$(cd "$(dirname "$4")" && pwd)/$(basename "$4")"
+SITE_E="$(cd "$5" && pwd)"
 unset VIRTUAL_ENV PYTHONPATH
 # The history's dates are Pacific time, and every commit is the builder's
 export TZ=America/Los_Angeles
@@ -39,12 +43,12 @@ mkdir -p "$TEMPLATES/stale" "$WORK/data"
 # The history arms in parallel, then none; the notebooks' kernels log to
 # stderr, which is shown only if a build fails
 pids=()
-for arm in messy messy-git make calkit; do
+for arm in messy messy-git make make-hint calkit; do
   "$PY" "$HERE/build_history.py" "$arm" "$TEMPLATES/$arm" \
     > "$WORK/build-$arm.log" 2>&1 &
   pids+=($!)
 done
-for arm in messy-git make calkit; do
+for arm in messy-git make make-hint calkit; do
   "$PY" "$HERE/build_history.py" "$arm" "$TEMPLATES/stale/$arm" --stale \
     > "$WORK/build-stale-$arm.log" 2>&1 &
   pids+=($!)
@@ -65,6 +69,10 @@ cmp "$TEMPLATES/make/results/score_by_week.png" \
   "$TEMPLATES/calkit/results/score_by_week.png"
 cmp "$TEMPLATES/make/results/report.md" "$TEMPLATES/calkit/results/report.md"
 cmp "$TEMPLATES/make/data/analysis.csv" "$TEMPLATES/none/data/merged_final.csv"
+# make-hint differs from make only in its README
+for f in results/score_by_week.png results/report.md data/analysis.csv; do
+  cmp "$TEMPLATES/make/$f" "$TEMPLATES/make-hint/$f"
+done
 for arm in messy messy-git; do
   cmp "$TEMPLATES/$arm/data/merged_final.csv" \
     "$TEMPLATES/none/data/merged_final.csv"
@@ -76,6 +84,9 @@ cmp "$TEMPLATES/make/results/model-ancova.json" \
 # Task 4's incoming file, from the coordinator
 "$PY" "$HERE/make_corrected_participants.py" \
   --participants "$WORK/data/participants.csv" --out "$INCOMING"
+# Site E's exports, for add-site
+rm -rf "$SITE_E"
+"$PY" -W ignore "$HERE/make_site_e.py" --out-dir "$SITE_E" > /dev/null
 # Times after the history ends only say when the build ran, e.g., in
 # .git/, so they become the history's last step
 "$PY" - "$TEMPLATES" "$ARCHIVE" "$MANIFEST" <<EOF

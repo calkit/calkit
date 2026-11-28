@@ -24,8 +24,9 @@ repos:
       # .calkit/env-locks, which calkit writes and compares byte for byte.
       - id: end-of-file-fixer
         exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/|(^|/)\.calkit/env-locks/
+      # A patch's context lines keep their leading space, blank lines too
       - id: trailing-whitespace
-        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/|(^|/)\.calkit/env-locks/
+        exclude: ^hub/frontend/src/client/|(^|/)renv/activate\.R$|^examples/.*/results/|(^|/)\.calkit/env-locks/|\.patch$
       - id: check-yaml
         args: ["--unsafe"]
       - id: check-json

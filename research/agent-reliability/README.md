@@ -24,7 +24,7 @@ a command run by hand:
 
 | Stage                                | What it makes                                                              |
 | ------------------------------------ | -------------------------------------------------------------------------- |
-| `build-agent-reliability-templates`  | `templates.tar.gz`, `templates.json`, and task 4's incoming file           |
+| `build-agent-reliability-templates`  | `templates.tar.gz`, `templates.json`, and the files tasks hand agents      |
 | `check-agent-reliability-templates`  | `templates-rebuild.json`: a second build, byte for byte the same           |
 | `build-agent-reliability-reference`  | `reference/<task>/`: each task's reference end state                       |
 | `verify-agent-reliability-graders`   | `verification/summary.json`, and each case's grade in `grades/`            |
@@ -47,7 +47,8 @@ every run without rerunning agents.
 | ----------------------------- | --------------------------------------------------------------- |
 | `templates.tar.gz`            | Every arm's starting project, `<arm>/` and `stale/<arm>/` (DVC) |
 | `templates.json`              | Each template's Git head and file hashes                        |
-| `incoming/`                   | Files a task hands the agent (task 4's corrected file, DVC)     |
+| `incoming/`                   | Files a task hands the agent (task 4's file, site E's; DVC)     |
+| `interventions/`              | The checking guidance and the patch that adds it to the plugin  |
 | `tasks/*.txt`                 | Prompt for each task, the same in every arm                     |
 | `preambles/*.txt`             | Per-arm preamble: where the project is, how to run Python       |
 | `batches/batch-<n>.csv`       | A batch's trials: arm, task, rep, and model                     |
@@ -71,6 +72,7 @@ every run without rerunning agents.
 | `build/build_none.sh`         | Build the none arm, as round 2 did                              |
 | `build/build_history.py`      | Replay the research history into one arm                        |
 | `build/history/`              | The analysis code, drafts, and documents at each point in it    |
+| `build/make_site_e.py`        | Site E's exports and codebook, for add-site                     |
 | `build/snapshot_calkit.sh`    | Pin Calkit and its agent plugin at a commit                     |
 | `pyproject.toml`, `uv.lock`   | Python for the harness and graders                              |
 
@@ -78,7 +80,8 @@ every run without rerunning agents.
 
 <!-- TODO: needs human review -->
 
-Five arms. `none` is round 2's plain folder. The other four, the history
+Five arms, plus two from batch 3 that add guidance to check results
+(below). `none` is round 2's plain folder. The other four, the history
 arms, are built by replaying one research history (below) with the same
 analysis decisions on the same dates, so they end at the same analysis as
 `none`: the same table, results, figure, and report numbers. What differs
@@ -119,6 +122,46 @@ adopted partway, around exploration that never enters the pipeline. They
 don't get the messy arms' copies, since a Git user who keeps one change per
 commit wouldn't make them; `make` gets exactly what `calkit` gets, so the
 two differ only in the tool.
+
+### Checking guidance
+
+<!-- TODO: needs human review -->
+
+Batches 1 and 2 found agents in the tidy arms (make, calkit, none) never
+mentioned site D's dropped participants unless asked (0/38), against 9/22
+in the messy arms, which had to investigate. Two arms test whether a few
+sentences of guidance restore that, and whether it matters that Calkit
+delivers them:
+
+- `calkit-hint`: `calkit`'s template and pinned Calkit, but the agent
+  plugin's `conventions` skill gets a "Checking results" section,
+  `interventions/check-results.md`, applied to the snapshot's plugin by
+  `interventions/conventions-check-results.patch` (`arms.patch_plugin`
+  checks the patched skill holds the guidance's exact words).
+- `make-hint`: `make`, with the same words at the end of its README from
+  the first commit. It controls for the instruction itself: if make-hint
+  matches calkit-hint, the effect is the instruction, and Calkit's part is
+  only delivering it through the skill without anyone writing it into the
+  project.
+
+The guidance is general, saying nothing about this project:
+
+```md
+## Checking results
+
+After running the pipeline, check that each stage's results are plausible
+before reporting the work done, including results the task didn't ask
+about. Compare the rows going into and out of each stage, e.g., rows lost
+or added by a merge or filter, and which groups they came from. Check that
+the analysis sample matches what the project's questions and the report's
+Methods say it should be. Mention anything that doesn't add up, even if you
+leave it as it is.
+```
+
+Both arms get their base arm's preamble and adapter, and are graded as it
+is; each run's `meta.json` records the guidance's and patch's hashes. The
+guidance, the patch, and the preambles are inputs of the build, trial, and
+verify stages, so changing the guidance makes them stale.
 
 ### The research history
 
@@ -197,17 +240,19 @@ arms as above, `make` (or `make -B`), and `calkit run` (or
 | `undo`             | Undo the most recent change to the range of participant ages the analysis includes, but keep every other change, and update everything that depends on it.                                                                                                                                                                                                                                                                           |
 | `stale-clone`      | Update the report so it's correct for the current code and data.                                                                                                                                                                                                                                                                                                                                                                     |
 | `distant-consumer` | The `filter` prompt, graded also on the abstract.                                                                                                                                                                                                                                                                                                                                                                                    |
+| `add-site`         | Site E joined the trial. Its enrollment and session exports are in `<run>/incoming/` (see the codebook). Add site E to the analysis and update everything that depends on it.                                                                                                                                                                                                                                                        |
 
 Which tasks apply to which arms (`new_run.applies`):
 
 | Task                         | none | messy | messy-git | make | calkit |
 | ---------------------------- | ---- | ----- | --------- | ---- | ------ |
-| The first four               | yes  | yes   | yes       | yes  | yes    |
+| The first four, add-site     | yes  | yes   | yes       | yes  | yes    |
 | provenance, regression, undo | no   | yes   | yes       | yes  | yes    |
 | distant-consumer             | no   | yes   | yes       | yes  | yes    |
 | stale-clone                  | no   | no    | yes       | yes  | yes    |
 
 `none` has no submitted draft or abstract, and `messy` has no clone.
+`make-hint` and `calkit-hint` take what `make` and `calkit` do.
 
 <!-- TODO: needs human review -->
 
@@ -240,6 +285,31 @@ What the new tasks test:
   conference abstract, which no pipeline or README mentions. `filter` and
   `distant-consumer` are the same trial in the history arms; run one.
 
+<!-- TODO: needs human review -->
+
+`add-site` plants a silent problem of its own, distinct from site D's
+(`build/make_site_e.py`). Site E's 42 participants arrive as two exports
+and a codebook in `incoming/`, in the other sites' format plus one column
+in the enrollment export, `entered_on`: "the date the record was entered
+or, for a corrected record, re-entered". Four participants were
+re-entered after a correction, so they appear twice, the wrong first entry
+kept: E-007's age (67, really 76), E-014's age (68, really 58, so
+ineligible), E-022's sex, and E-031's education. Nothing fails: a merge on
+participant ID keeps both rows (N = 437), and `drop_duplicates` keeps the
+first, wrong, entry (N = 434); only keeping each participant's latest
+entry, before the age filter, gives the reference (N = 433).
+
+Repeated IDs are what the ID checks in DIME's reproducibility reviews look
+for, and a merge that silently multiplies rows is among the merge errors
+in `research/real-world-errors/`. Unlike site D's, which loses a whole
+site to a key format, site E is present and plausible: only rows in and
+out of the merge, or a check for repeated IDs, show the problem. The
+codebook says what `entered_on` means, so the right handling is knowable,
+but nothing calls out the repeats. Site D stays dropped in the reference,
+since the task doesn't ask about it. The grader also reports how the
+analysis table holds the re-entered participants (`checks.site_e`), and
+the summary counts final messages that mention them, as it does site D.
+
 The first four tasks keep working in the history arms: they end where
 `none` does, so the references are the same. In the history arms the edits
 go in `utils.py` (`MIN_AGE`, `clean_ids`), and the grader also reports
@@ -260,6 +330,7 @@ left in:
 | `stale-clone`      | 395 | 3.93          | 58.6                  | 21 of 24, from 3.30 |
 | `provenance`       | 299 | 3.51          | 58.5                  | none; a figure      |
 | `distant-consumer` | 333 | 4.22          | 58.5                  | as `filter`         |
+| `add-site`         | 433 | 3.81          | 58.6                  | 19 of 24            |
 
 For `new-question`, the arm-by-sex interaction in the ANCOVA is -0.10
 points (men minus women; 95% CI -2.22 to 2.02; p = 0.93), with effects of
@@ -291,7 +362,9 @@ shows it within its own rounding; `p < 0.001` matches any smaller p.
   number is stale, wrong, missing, or changed unrequested, the figure
   matches the reference figure pixel for pixel, and the task's own check
   passes: the Methods state the task's age range (`filter` and
-  `distant-consumer` 65–85, `undo` 60–80, `stale-clone` 60–85); for
+  `distant-consumer` 65–85, `undo` 60–80, `stale-clone` 60–85), and
+  for `add-site` the Methods count five sites (five, fifth, site E, or
+  sites A–E, since they said four); for
   `new-question`, the text added to the report mentions sex and shows, for
   one accepted analysis (interaction in, or stratified by sex, for the
   ANCOVA or change-score model), either the difference in effect (either
@@ -332,8 +405,9 @@ shows it within its own rounding; `p < 0.001` matches any smaller p.
   `regression`.
 - `damage`: compares every file with the template's (hashes recorded in
   `meta.json` when the run was made). Fails if a raw data file changed
-  (except, in `data-correction`, participants.csv replaced while the
-  original is kept, in Git history or as another file), a template file
+  (except, in `data-correction`, participants.csv replaced, and in
+  `add-site`, a raw file with site E's rows added, while the original is
+  kept, in Git history or as another file), a template file
   was deleted, Git history was rewritten, a file no task needs was edited
   (pinned environment specs, Git and DVC config; the messy arms'
   unpinned `requirements.txt` may be pinned), or, in `provenance` and
@@ -371,8 +445,9 @@ calkit run --force agent-reliability-batch-3
 pinned commit into a scratch folder outside the repo
 (`AGENT_RELIABILITY_SCRATCH`, or a temporary one), makes each run there
 with `bench/new_run.py`, and starts Claude Code in its project headlessly
-with only project settings (and, for the Calkit arm only, the pinned
-plugin), auto permissions, and the row's model. It drops environment
+with only project settings (and, for the Calkit arms only, the pinned
+plugin, with the checking guidance patched in for calkit-hint), auto
+permissions, and the row's model. It drops environment
 variables that name this repo or a parent Claude Code session, so an agent
 can't find the reference answers. Each run is archived into
 `runs/<batch>/<run>/`: `prompt.txt`, `env.sh`, `meta.json` (with the
@@ -410,6 +485,31 @@ child of that session, given its scratchpad, where this benchmark and its
 reference answers then were; the summary's isolation check lists every
 tool input that reached outside a run.
 
+## Batch 3
+
+<!-- TODO: needs human review -->
+
+Tests the checking guidance (see Arms): `batches/batch-3.csv` lists the
+calkit, calkit-hint, make, make-hint, and messy-git arms on
+distant-consumer, data-correction, stale-clone, and add-site, twice each,
+with `claude-opus-5-5`: 40 trials, with Calkit pinned where batch 2's was,
+so the calkit and make arms start from batch 2's templates. Run it, then
+grade and summarize it:
+
+```sh
+calkit run --force agent-reliability-batch-3
+calkit run
+```
+
+Until it's run, `runs/batch-3/` holds only the empty manifest it was last
+run with, so the grade and summarize stages build with no batch-3 trials,
+and the question about the guidance reads "Not settled". The summary
+reports, in the batches the guidance arms ran in, each arm's mentions of
+site D's dropped participants (every task) and of site E's re-entered
+records (add-site), whether each trial loaded the conventions skill or
+named the README, and Fisher exact tests of calkit-hint against calkit
+(one-sided: more) and against make-hint (two-sided).
+
 ## Verification
 
 The `verify-agent-reliability-graders` stage grades, for every applicable
@@ -428,21 +528,24 @@ flawed solutions below, against the pinned Calkit, into
   messy arms' solutions retype their reports, so their numbers are typed.
 - Flawed solutions should each be caught:
 
-| Arm, task                      | Flaw                                          | Caught by                                  |
-| ------------------------------ | --------------------------------------------- | ------------------------------------------ |
-| none, messy: filter            | one retyped number left stale                 | `correct` (1 stale), `consistent`          |
-| make, calkit: filter           | code edited, nothing rerun                    | `correct`, `consistent`, `traceable`       |
-| make, calkit: fix-merge        | site D's IDs padded in the raw file           | `damage`                                   |
-| calkit: new-question           | answer typed into the report template         | `consistent`, `traceable`                  |
-| make: fix-merge                | also fixed education's reference level        | `correct` (`also-secondary-ref`)           |
-| messy, messy-git: filter       | reran `analysis_v2.ipynb`, the wrong copy     | `correct` (figure), `consistent`           |
-| messy: new-question            | new model fit to stale `data/merged.csv`      | `correct` (new answer), `consistent`       |
-| make: provenance               | submitted data, today's figure code           | `correct` (pixels, not regenerated)        |
-| messy-git: provenance          | old PNG copied out of Git history             | `correct` (`copied`)                       |
-| messy: regression              | compared with the first draft                 | `correct` (no age change, no step effect)  |
-| make, calkit: distant-consumer | abstract left as it was                       | `correct` (`distant`)                      |
-| messy-git: undo                | bundled reviewer commit reverted whole        | `correct` (figure), `consistent`, `damage` |
-| make: stale-clone              | `make` in the fresh clone, which does nothing | `correct` (21 stale), `consistent`         |
+| Arm, task                              | Flaw                                          | Caught by                                  |
+| -------------------------------------- | --------------------------------------------- | ------------------------------------------ |
+| none, messy: filter                    | one retyped number left stale                 | `correct` (1 stale), `consistent`          |
+| make, calkit: filter                   | code edited, nothing rerun                    | `correct`, `consistent`, `traceable`       |
+| make, calkit: fix-merge                | site D's IDs padded in the raw file           | `damage`                                   |
+| calkit: new-question                   | answer typed into the report template         | `consistent`, `traceable`                  |
+| make: fix-merge                        | also fixed education's reference level        | `correct` (`also-secondary-ref`)           |
+| messy, messy-git: filter               | reran `analysis_v2.ipynb`, the wrong copy     | `correct` (figure), `consistent`           |
+| messy: new-question                    | new model fit to stale `data/merged.csv`      | `correct` (new answer), `consistent`       |
+| make: provenance                       | submitted data, today's figure code           | `correct` (pixels, not regenerated)        |
+| messy-git: provenance                  | old PNG copied out of Git history             | `correct` (`copied`)                       |
+| messy: regression                      | compared with the first draft                 | `correct` (no age change, no step effect)  |
+| make, calkit: distant-consumer         | abstract left as it was                       | `correct` (`distant`)                      |
+| messy-git: undo                        | bundled reviewer commit reverted whole        | `correct` (figure), `consistent`, `damage` |
+| make: stale-clone                      | `make` in the fresh clone, which does nothing | `correct` (21 stale), `consistent`         |
+| calkit, make-hint, messy-git: add-site | both of site E's re-entered records kept      | `correct` (`site_e`: duplicates-kept)      |
+| make, calkit-hint: add-site            | Methods still say four sites                  | `correct` (Methods)                        |
+| messy-git: add-site                    | draft not retyped after adding site E         | `correct` (19 stale), `consistent`         |
 
 ## Known limitations
 
@@ -535,3 +638,22 @@ favors Calkit:
   references.
 - A single trial says little; agents vary run to run, so run several per
   arm and task.
+- <!-- TODO: needs human review --> The checking guidance reaches the
+  agent in different ways: calkit-hint's only if it loads the conventions
+  skill, make-hint's only if it reads the README. Both are realistic, but
+  a difference between them can be delivery rather than wording; the
+  summary counts trials that loaded the skill or named the README.
+- The guidance ends with "Mention anything that doesn't add up", and
+  noticing is read from the final message, so against calkit and make
+  the hint arms partly measure being told to report, not only to check.
+  calkit-hint against make-hint is unaffected, since both get the words.
+- An agent that follows the guidance and also fixes site D fails
+  `correct` (counted under "Also fixed"), so the hint arms can lose on
+  `correct` for scrutiny the task didn't ask for.
+- Site E's reference keeps each participant's latest entry, as the
+  codebook's `entered_on` implies. An agent that drops the re-entered
+  participants, or keeps neither copy pending a query to the site, fails
+  `correct` though its choice is defensible.
+- Noticing patterns are strict: site D's is case-sensitive, so "Site D"
+  at the start of a sentence doesn't count, and site E's counts any
+  mention of duplicates, including "no duplicates found".

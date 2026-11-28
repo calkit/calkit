@@ -90,11 +90,13 @@ stages:
       4718ca51d76e1d77b4b5d6c582167d697421203d
       agent-reliability/templates.tar.gz agent-reliability/templates.json
       agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      agent-reliability/incoming/site-e
     deps:
       - agent-reliability/build/build_templates.sh
       - agent-reliability/build
       - agent-reliability/bench/arms.py
       - agent-reliability/bench/archive.py
+      - agent-reliability/interventions
       - agent-reliability/versions.env
       - agent-reliability/uv.lock
       - agent-reliability/.python-version
@@ -104,6 +106,7 @@ stages:
           cache: false
           persist: false
       - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      - agent-reliability/incoming/site-e
     desc: Automatically generated from the 'build-agent-reliability-templates'
       stage in calkit.yaml. Changes made here will be overwritten.
   check-agent-reliability-templates:
@@ -111,18 +114,20 @@ stages:
       agent-reliability/build/check_rebuild.sh
       4718ca51d76e1d77b4b5d6c582167d697421203d agent-reliability/templates.json
       agent-reliability/incoming/participants_2026-05-20_corrected.csv
-      agent-reliability/templates-rebuild.json
+      agent-reliability/incoming/site-e agent-reliability/templates-rebuild.json
     deps:
       - agent-reliability/build/check_rebuild.sh
       - agent-reliability/build
       - agent-reliability/bench/arms.py
       - agent-reliability/bench/archive.py
+      - agent-reliability/interventions
       - agent-reliability/versions.env
       - agent-reliability/uv.lock
       - agent-reliability/.python-version
       - agent-reliability/templates.tar.gz
       - agent-reliability/templates.json
       - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      - agent-reliability/incoming/site-e
     outs:
       - agent-reliability/templates-rebuild.json:
           cache: false
@@ -133,12 +138,14 @@ stages:
     cmd: calkit xenv -n agent-reliability --no-check -- python
       agent-reliability/bench/reference.py agent-reliability/templates.tar.gz
       agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      agent-reliability/incoming/site-e
     deps:
       - agent-reliability/bench/reference.py
       - agent-reliability/bench/arms.py
       - agent-reliability/bench/archive.py
       - agent-reliability/build/generate_data.py
       - agent-reliability/build/make_corrected_participants.py
+      - agent-reliability/build/make_site_e.py
       - agent-reliability/build/shared/make_figure.py
       - agent-reliability/build/history/make_figure_se.py
       - agent-reliability/uv.lock
@@ -146,6 +153,7 @@ stages:
       - agent-reliability/templates.tar.gz
       - agent-reliability/templates.json
       - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      - agent-reliability/incoming/site-e
     outs:
       - agent-reliability/reference
     desc: Automatically generated from the 'build-agent-reliability-reference'
@@ -166,12 +174,14 @@ stages:
       - agent-reliability/build
       - agent-reliability/tasks
       - agent-reliability/preambles
+      - agent-reliability/interventions
       - agent-reliability/versions.env
       - agent-reliability/uv.lock
       - agent-reliability/.python-version
       - agent-reliability/templates.tar.gz
       - agent-reliability/templates.json
       - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      - agent-reliability/incoming/site-e
       - agent-reliability/reference
     outs:
       - agent-reliability/verification/summary.json:
@@ -227,12 +237,14 @@ stages:
       - agent-reliability/build/snapshot_calkit.sh
       - agent-reliability/tasks
       - agent-reliability/preambles
+      - agent-reliability/interventions
       - agent-reliability/versions.env
       - agent-reliability/uv.lock
       - agent-reliability/.python-version
       - agent-reliability/templates.tar.gz
       - agent-reliability/templates.json
       - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+      - agent-reliability/incoming/site-e
       - agent-reliability/reference
     outs:
       - agent-reliability/runs/batch-3
@@ -281,9 +293,30 @@ stages:
       - agent-reliability/grades/batch-2
     desc: Automatically generated from the 'grade-agent-reliability-batch-2'
       stage in calkit.yaml. Changes made here will be overwritten.
+  grade-agent-reliability-batch-3:
+    cmd: calkit xenv -n agent-reliability --no-check -- python
+      agent-reliability/bench/regrade.py batch-3 --jobs=8
+    deps:
+      - agent-reliability/bench/regrade.py
+      - agent-reliability/bench/arms.py
+      - agent-reliability/bench/archive.py
+      - agent-reliability/bench/grade.py
+      - agent-reliability/bench/new_run.py
+      - agent-reliability/bench/report.py
+      - agent-reliability/build/shared/make_figure.py
+      - agent-reliability/build/snapshot_calkit.sh
+      - agent-reliability/versions.env
+      - agent-reliability/uv.lock
+      - agent-reliability/.python-version
+      - agent-reliability/runs/batch-3
+      - agent-reliability/reference
+    outs:
+      - agent-reliability/grades/batch-3
+    desc: Automatically generated from the 'grade-agent-reliability-batch-3'
+      stage in calkit.yaml. Changes made here will be overwritten.
   summarize-agent-reliability:
     cmd: calkit xenv -n agent-reliability --no-check -- python
-      agent-reliability/bench/summarize.py batch-1 batch-2
+      agent-reliability/bench/summarize.py batch-1 batch-2 batch-3
     deps:
       - agent-reliability/bench/summarize.py
       - agent-reliability/templates.json
@@ -292,8 +325,10 @@ stages:
       - agent-reliability/.python-version
       - agent-reliability/runs/batch-1
       - agent-reliability/runs/batch-2
+      - agent-reliability/runs/batch-3
       - agent-reliability/grades/batch-1
       - agent-reliability/grades/batch-2
+      - agent-reliability/grades/batch-3
     outs:
       - results/agent-reliability.json:
           cache: false

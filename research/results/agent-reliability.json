@@ -1,7 +1,8 @@
 {
   "batches": [
     "batch-1",
-    "batch-2"
+    "batch-2",
+    "batch-3"
   ],
   "n_runs": 70,
   "by_batch": {
@@ -1312,6 +1313,37 @@
           }
         }
       }
+    },
+    "batch-3": {
+      "all": {
+        "n": 0,
+        "n_all_pass": 0,
+        "correct": {
+          "pass": 0,
+          "n": 0
+        },
+        "consistent": {
+          "pass": 0,
+          "n": 0
+        },
+        "damage": {
+          "pass": 0,
+          "n": 0
+        },
+        "traceable": {
+          "pass": 0,
+          "n": 0
+        },
+        "distant": {
+          "pass": 0,
+          "n": 0
+        },
+        "n_incorrect_from_also_fixing": 0,
+        "mean_cost_usd": null,
+        "total_cost_usd": 0,
+        "mean_minutes": null,
+        "mean_turns": null
+      }
     }
   },
   "arms": {
@@ -2515,6 +2547,10 @@
             "noticed": 0,
             "n": 2
           }
+        },
+        "site_e": {
+          "noticed": 0,
+          "n": 0
         }
       },
       "messy": {
@@ -2541,6 +2577,10 @@
             "noticed": 0,
             "n": 2
           }
+        },
+        "site_e": {
+          "noticed": 0,
+          "n": 0
         }
       },
       "messy-git": {
@@ -2571,6 +2611,10 @@
             "noticed": 0,
             "n": 2
           }
+        },
+        "site_e": {
+          "noticed": 0,
+          "n": 0
         }
       },
       "make": {
@@ -2609,6 +2653,10 @@
             "noticed": 0,
             "n": 2
           }
+        },
+        "site_e": {
+          "noticed": 0,
+          "n": 0
         }
       },
       "calkit": {
@@ -2647,6 +2695,10 @@
             "noticed": 0,
             "n": 2
           }
+        },
+        "site_e": {
+          "noticed": 0,
+          "n": 0
         }
       }
     },
@@ -2659,6 +2711,7 @@
       "n": 38
     },
     "fisher_p_one_sided": 3.3647784604413746e-05,
+    "site_e_pattern": "[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\\b|[Rr]e-?entr(?:y|ies)\\b|entered (?:twice|again)|entered_on|(?:latest|most recent) (?:entry|record)",
     "runs": {
       "messy-git__provenance__20261127-215415-517060": [
         "site D"
@@ -2706,6 +2759,116 @@
         "D-009",
         "D-9"
       ]
+    },
+    "runs_site_e": {},
+    "interventions": {
+      "batches": [],
+      "arms": {
+        "messy-git": {
+          "n": 0,
+          "n_loaded_conventions": 0,
+          "n_named_readme": 0,
+          "site_d": {
+            "noticed": 0,
+            "n": 0
+          },
+          "site_e": {
+            "noticed": 0,
+            "n": 0
+          },
+          "add_site_correct": {
+            "pass": 0,
+            "n": 0
+          },
+          "site_e_handling": {}
+        },
+        "make": {
+          "n": 0,
+          "n_loaded_conventions": 0,
+          "n_named_readme": 0,
+          "site_d": {
+            "noticed": 0,
+            "n": 0
+          },
+          "site_e": {
+            "noticed": 0,
+            "n": 0
+          },
+          "add_site_correct": {
+            "pass": 0,
+            "n": 0
+          },
+          "site_e_handling": {}
+        },
+        "make-hint": {
+          "n": 0,
+          "n_loaded_conventions": 0,
+          "n_named_readme": 0,
+          "site_d": {
+            "noticed": 0,
+            "n": 0
+          },
+          "site_e": {
+            "noticed": 0,
+            "n": 0
+          },
+          "add_site_correct": {
+            "pass": 0,
+            "n": 0
+          },
+          "site_e_handling": {}
+        },
+        "calkit": {
+          "n": 0,
+          "n_loaded_conventions": 0,
+          "n_named_readme": 0,
+          "site_d": {
+            "noticed": 0,
+            "n": 0
+          },
+          "site_e": {
+            "noticed": 0,
+            "n": 0
+          },
+          "add_site_correct": {
+            "pass": 0,
+            "n": 0
+          },
+          "site_e_handling": {}
+        },
+        "calkit-hint": {
+          "n": 0,
+          "n_loaded_conventions": 0,
+          "n_named_readme": 0,
+          "site_d": {
+            "noticed": 0,
+            "n": 0
+          },
+          "site_e": {
+            "noticed": 0,
+            "n": 0
+          },
+          "add_site_correct": {
+            "pass": 0,
+            "n": 0
+          },
+          "site_e_handling": {}
+        }
+      },
+      "tests": {
+        "hint_vs_calkit": {
+          "vs": "calkit",
+          "alternative": "greater",
+          "site_d_p": 1.0,
+          "site_e_p": 1.0
+        },
+        "hint_vs_make_hint": {
+          "vs": "make-hint",
+          "alternative": "two-sided",
+          "site_d_p": 1.0,
+          "site_e_p": 1.0
+        }
+      }
     }
   },
   "isolation": {
@@ -2995,7 +3158,8 @@
         "same_git_head": true,
         "files_differing": []
       }
-    }
+    },
+    "batch-3": {}
   },
   "runs": [
     {
@@ -3016,8 +3180,13 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3053,8 +3222,13 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3090,8 +3264,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3127,8 +3306,13 @@
       "turns": 11,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3164,11 +3348,16 @@
       "turns": 11,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/old-ancova.json",
         "/tmp/old-change.json"
       ],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3204,8 +3393,13 @@
       "turns": 12,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3241,10 +3435,15 @@
       "turns": 15,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/bysex.json"
       ],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3280,10 +3479,15 @@
       "turns": 12,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/sex.json"
       ],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3319,10 +3523,15 @@
       "turns": 7,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/old_report.md"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3356,8 +3565,13 @@
       "turns": 6,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3391,8 +3605,13 @@
       "turns": 7,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3426,8 +3645,13 @@
       "turns": 6,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3461,8 +3685,13 @@
       "turns": 7,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3496,8 +3725,13 @@
       "turns": 9,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3531,8 +3765,13 @@
       "turns": 7,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3566,10 +3805,15 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/bysex.json"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3603,12 +3847,17 @@
       "turns": 7,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/old_ancova.json",
         "/tmp/old_change.json",
         "/tmp/old_{m}.json"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -3635,6 +3884,9 @@
       "turns": 8,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/chk",
@@ -3644,6 +3896,8 @@
         "/tmp/old_change.json",
         "/tmp/old_merged_final.csv"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -3670,10 +3924,15 @@
       "turns": 7,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/chk.csv"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -3700,10 +3959,15 @@
       "turns": 7,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/chk.csv"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -3730,8 +3994,13 @@
       "turns": 10,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -3758,10 +4027,15 @@
       "turns": 9,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/old_results_$$"
       ],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -3788,6 +4062,9 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/chk",
@@ -3797,6 +4074,8 @@
         "/tmp/chk/o.json",
         "/tmp/chk/old.csv"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -3823,6 +4102,9 @@
       "turns": 8,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/chk",
@@ -3830,6 +4112,8 @@
         "/tmp/chk/c.json",
         "/tmp/chk/m.csv"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -3856,8 +4140,13 @@
       "turns": 11,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3884,8 +4173,13 @@
       "turns": 11,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3912,10 +4206,15 @@
       "turns": 11,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/var/folders/s_/hs4wzl4j51d8tj7v6_cz5s3m0000gn/T/tmp.HkgYtKudhw"
       ],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3942,8 +4241,13 @@
       "turns": 8,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -3970,6 +4274,9 @@
       "turns": 11,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/cx",
@@ -3978,6 +4285,8 @@
         "/tmp/cx/p_old.csv",
         "/tmp/cx/sessions_old.csv"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -4004,6 +4313,9 @@
       "turns": 12,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/chk",
@@ -4011,6 +4323,8 @@
         "/tmp/chk/s_old.csv",
         "/tmp/chk/w"
       ],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -4037,8 +4351,13 @@
       "turns": 11,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -4065,10 +4384,15 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/report_old.md"
       ],
+      "loaded_conventions": true,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -4095,8 +4419,13 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -4123,8 +4452,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": false,
@@ -4151,8 +4485,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4177,8 +4516,13 @@
       "turns": 8,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4203,11 +4547,16 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/orig_analysis.csv",
         "/tmp/orig_fig.png"
       ],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4232,8 +4581,13 @@
       "turns": 8,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4258,11 +4612,16 @@
       "turns": 13,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp",
         "/tmp/ckwt"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4287,8 +4646,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4313,8 +4677,13 @@
       "turns": 6,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4339,8 +4708,13 @@
       "turns": 6,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4365,8 +4739,13 @@
       "turns": 7,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4391,8 +4770,13 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4417,8 +4801,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4443,8 +4832,13 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4469,8 +4863,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4495,8 +4894,13 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4521,8 +4925,13 @@
       "turns": 12,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4547,8 +4956,13 @@
       "turns": 13,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4575,10 +4989,15 @@
       "notice_matches": [
         "site D"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/m_orig.csv"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4607,11 +5026,16 @@
         "D-9",
         "zero-pad"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/x_exec.ipynb",
         "/var/folders/s_/hs4wzl4j51d8tj7v6_cz5s3m0000gn/T/tmp.DHpGCseVd9"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4641,11 +5065,16 @@
         "site D",
         "zero-pad"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/chk",
         "/tmp/chk/steps.py"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4670,12 +5099,17 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/chk",
         "/tmp/chk/more.py",
         "/tmp/chk/steps.py"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4707,8 +5141,13 @@
         "leading zero",
         "site D"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4740,8 +5179,13 @@
         "leading zero",
         "site D"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4766,8 +5210,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4792,8 +5241,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": false,
         "same_git_head": true,
@@ -4818,8 +5272,13 @@
       "turns": 8,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -4844,8 +5303,13 @@
       "turns": 9,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -4875,11 +5339,16 @@
         "leading zero",
         "site D"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/bak_proj",
         "/tmp/bak_proj/"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -4904,8 +5373,13 @@
       "turns": 10,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -4930,10 +5404,15 @@
       "turns": 12,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/merged_final_before.csv"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -4958,10 +5437,15 @@
       "turns": 11,
       "noticed_site_d": null,
       "notice_matches": null,
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/proj_backup_$$"
       ],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -4990,8 +5474,13 @@
         "D-9",
         "zero-pad"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -5016,8 +5505,13 @@
       "turns": 8,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -5046,10 +5540,15 @@
         "D-9",
         "zero-pad"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/chg"
       ],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -5077,11 +5576,16 @@
         "D-009",
         "D-9"
       ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/chk",
         "/private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/chk/rep.py"
       ],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -5106,12 +5610,17 @@
       "turns": 8,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [
         "/tmp/bak_undo",
         "/tmp/bak_undo/",
         "/tmp/bak_undo/paper/draft.md"
       ],
+      "loaded_conventions": false,
+      "named_readme": false,
       "template": {
         "no_git": true,
         "same_git_head": true,
@@ -5136,8 +5645,13 @@
       "turns": 7,
       "noticed_site_d": false,
       "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
       "benchmark_access": [],
       "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
       "template": {
         "no_git": true,
         "same_git_head": true,

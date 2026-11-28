@@ -66,9 +66,26 @@ ARMS["messy-git"] = {**MESSY, "git": True}
 for _arm in ["none", "make", "calkit"]:
     ARMS[_arm]["git"] = _arm != "none"
     ARMS[_arm]["env_pinned"] = True
+# Intervention arms: a base arm with one change, which is all that differs
+# between them, so they share its adapter. calkit-hint's agent plugin gets
+# the checking guidance in its conventions skill, applied as a patch, and
+# make-hint's README gets the same words (its own template, built with it)
+BASES = {"calkit-hint": "calkit", "make-hint": "make"}
+INTERVENTIONS = ROOT / "interventions"
+GUIDANCE = INTERVENTIONS / "check-results.md"
+PLUGIN_PATCH = INTERVENTIONS / "conventions-check-results.patch"
+for _arm, _base in BASES.items():
+    ARMS[_arm] = ARMS[_base]
 # Where the history arms type the main effect a second time
 DISTANT = "talks/GSA2026_abstract.md"
-HISTORY_ARMS = ["messy", "messy-git", "make", "calkit"]
+HISTORY_ARMS = [
+    "messy",
+    "messy-git",
+    "make",
+    "make-hint",
+    "calkit",
+    "calkit-hint",
+]
 # Where each Git history arm keeps Figure 1 and the code behind it
 SUBMITTED_FIGURES = {
     "messy-git": "figures/fig1_FINAL.png",
@@ -80,6 +97,9 @@ SUBMITTED_CODE = {
     "make": ["scripts", "Makefile"],
     "calkit": ["scripts", "pyproject.toml"],
 }
+for _arm, _base in BASES.items():
+    SUBMITTED_FIGURES[_arm] = SUBMITTED_FIGURES[_base]
+    SUBMITTED_CODE[_arm] = SUBMITTED_CODE[_base]
 # Never part of a project's content: VCS internals, caches, environments
 SKIP_DIRS = {
     ".git",
@@ -100,6 +120,48 @@ BOOKKEEPING = {".calkit/stage-runs.json"}
 def get_templates_dir() -> Path:
     """Where the built templates are, unpacked from the build's archive."""
     return Path(os.environ.get("BENCH_TEMPLATES", ROOT / "templates"))
+
+
+def get_base(arm: str) -> str:
+    """The arm whose layout, preamble, and way of running an arm shares."""
+    return BASES.get(arm, arm)
+
+
+def get_template_name(arm: str) -> str:
+    """The template an arm starts from: its own, except calkit-hint, whose
+    change is only to the agent plugin, so it starts from calkit's.
+    """
+    return "calkit" if arm == "calkit-hint" else arm
+
+
+def get_intervention(arm: str) -> dict | None:
+    """Hashes of the files an intervention arm's change comes from."""
+    if arm not in BASES:
+        return None
+    return {
+        "guidance_sha256": get_sha256(GUIDANCE),
+        "plugin_patch_sha256": get_sha256(PLUGIN_PATCH)
+        if arm == "calkit-hint"
+        else None,
+    }
+
+
+def patch_plugin(plugin: Path, dest: Path) -> Path:
+    """A copy of the agent plugin with the checking guidance added to its
+    conventions skill, checked to hold the guidance's exact words.
+    """
+    shutil.copytree(plugin, dest)
+    # Outside any repo, so Git applies it to this folder alone
+    subprocess.run(
+        ["git", "apply", "-p1", str(PLUGIN_PATCH)],
+        cwd=dest,
+        env={**os.environ, "GIT_CEILING_DIRECTORIES": str(dest.parent)},
+        check=True,
+        capture_output=True,
+    )
+    skill = (dest / "skills/conventions/SKILL.md").read_text()
+    assert GUIDANCE.read_text() in skill, "patch and guidance differ"
+    return dest
 
 
 def get_calkit_command() -> str:
@@ -253,10 +315,10 @@ def run_project(
     """
     scratch.mkdir(parents=True, exist_ok=True)
     env = get_env(venv, scratch)
-    if arm == "calkit":
+    if get_base(arm) == "calkit":
         calkit = shlex.split(get_calkit_command())
         commands = [calkit + ["run"] + (["--force"] if force else [])]
-    elif arm == "make":
+    elif get_base(arm) == "make":
         commands = [["make"] + (["-B"] if force else [])]
     else:
         commands = []

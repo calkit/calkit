@@ -53,6 +53,10 @@ METHODS_SEX = (
     " whether the training effect differed between women and men, we added"
     " an arm-by-sex interaction to the primary model.",
 )
+METHODS_SITES = (
+    "recruited at four community centers",
+    "recruited at five community centers",
+)
 ITEM_8 = "(R² = {r_squared:.3f})."
 ITEM_9 = (
     "\n9. The training effect {sex_conclusion} between women and men: it"
@@ -164,6 +168,9 @@ def edit_template(text: str, task: str) -> str:
     if task == "new-question":
         assert text.count(METHODS_SEX[0]) == 1 and text.count(ITEM_8) == 1
         text = text.replace(*METHODS_SEX).replace(ITEM_8, ITEM_8 + ITEM_9)
+    if task == "add-site":
+        assert text.count(METHODS_SITES[0]) == 1
+        text = text.replace(*METHODS_SITES)
     return text
 
 
@@ -199,7 +206,9 @@ def type_report(
     (project / out).write_text(text)
 
 
-def solve_none(run_dir: Path, project: Path, task: str, env: dict) -> None:
+def solve_none(
+    run_dir: Path, project: Path, task: str, env: dict, dedupe: bool = True
+) -> None:
     readme = project / "README.md"
     if task == "new-question":
         (project / "scripts/fit_by_sex.py").write_text(BY_SEX_SCRIPT)
@@ -210,6 +219,8 @@ def solve_none(run_dir: Path, project: Path, task: str, env: dict) -> None:
             "python scripts/fit_by_sex.py --data data/merged_final.csv"
             " --out results/model_by_sex.json\n",
         )
+    if task == "add-site":
+        add_site_none(run_dir, project, dedupe)
     if task == "data-correction":
         name = "participants_2026-05-20_corrected.csv"
         shutil.copy2(run_dir / "incoming" / name, project / "data/raw" / name)
@@ -262,6 +273,180 @@ def edit_code(project: Path, arm: str, task: str) -> None:
         replace_once(utils, *UTILS_UNDO)
 
 
+SITE_E = ["site_E_enrollment.csv", "site_E_sessions.csv"]
+LATEST_ENTRIES = """
+
+def latest_entries(participants):
+    \"\"\"One record per participant: a site may re-enter a corrected record
+    under the same ID, and the latest entry (`entered_on`) is current.
+    \"\"\"
+    if "entered_on" not in participants:
+        return participants
+    participants = participants.sort_values("entered_on", kind="stable")
+    participants = participants.drop_duplicates("participant_id", keep="last")
+    return participants.drop(columns="entered_on")
+"""
+# Read every participants and sessions file, then keep one record each
+CAREFUL_READ = (
+    "    participants = utils.clean_ids(pd.read_csv(args.participants, **read))\n"
+    "    sessions = utils.clean_ids(pd.read_csv(args.sessions, **read))\n",
+    "    participants = pd.concat(\n"
+    "        [pd.read_csv(f, **read) for f in args.participants]\n"
+    "    )\n"
+    "    sessions = pd.concat([pd.read_csv(f, **read) for f in args.sessions])\n"
+    "    participants = utils.clean_ids(participants)\n"
+    "    sessions = utils.clean_ids(sessions)\n"
+    "@DEDUPE@",
+)
+FLAT_READ = (
+    "participants = clean_ids(pd.read_csv(PARTICIPANTS, **read))\n"
+    "sessions = clean_ids(pd.read_csv(SESSIONS, **read))\n",
+    "participants = clean_ids(\n"
+    "    pd.concat([pd.read_csv(f, **read) for f in PARTICIPANTS])\n"
+    ")\n"
+    "sessions = clean_ids(pd.concat([pd.read_csv(f, **read) for f in SESSIONS]))\n"
+    "@DEDUPE@",
+)
+NONE_READ = (
+    "    participants = pd.read_csv(\n"
+    '        args.participants, dtype={"participant_id": str}\n'
+    "    )\n"
+    '    sessions = pd.read_csv(args.sessions, dtype={"participant_id": str})\n',
+    '    read = {"dtype": {"participant_id": str}}\n'
+    "    participants = pd.concat(\n"
+    "        [pd.read_csv(f, **read) for f in args.participants]\n"
+    "    )\n"
+    "    sessions = pd.concat([pd.read_csv(f, **read) for f in args.sessions])\n",
+)
+NONE_DEDUPE = (
+    '        df["participant_id"] = df["participant_id"].str.strip().str.upper()\n',
+    '        df["participant_id"] = df["participant_id"].str.strip().str.upper()\n'
+    "    # Site E re-enters a corrected record under the same ID; the latest\n"
+    "    # entry is current\n"
+    '    participants = participants.sort_values("entered_on", kind="stable")\n'
+    "    participants = participants.drop_duplicates(\n"
+    '        "participant_id", keep="last"\n'
+    '    ).drop(columns="entered_on")\n',
+)
+NARGS = [
+    (
+        f'    parser.add_argument("--{name}", required=True)\n',
+        f'    parser.add_argument("--{name}", required=True, nargs="+")\n',
+    )
+    for name in ["participants", "sessions"]
+]
+
+
+def copy_site_e(run_dir: Path, project: Path) -> None:
+    for name in SITE_E:
+        shutil.copy2(run_dir / "incoming" / name, project / "data/raw" / name)
+
+
+def add_site_none(run_dir: Path, project: Path, dedupe: bool) -> None:
+    """Site E's exports in data/raw, read with the others, and one record
+    kept per participant; `dedupe` false is the silent mistake.
+    """
+    copy_site_e(run_dir, project)
+    prepare = project / "scripts/prepare_data.py"
+    for edit in NARGS:
+        replace_once(prepare, *edit)
+    replace_once(prepare, *NONE_READ)
+    if dedupe:
+        replace_once(prepare, *NONE_DEDUPE)
+    readme = project / "README.md"
+    replace_once(
+        readme,
+        "--participants data/raw/participants.csv",
+        "--participants data/raw/participants.csv data/raw/site_E_enrollment.csv",
+    )
+    replace_once(
+        readme,
+        "--sessions data/raw/sessions_2026-04-14_corrected.csv",
+        "--sessions data/raw/sessions_2026-04-14_corrected.csv"
+        " data/raw/site_E_sessions.csv",
+    )
+
+
+def add_site(run_dir: Path, project: Path, arm: str, dedupe: bool) -> None:
+    """add_site_none for the history arms, whose scripts import utils.py,
+    and whose runner, if any, lists the new files.
+    """
+    copy_site_e(run_dir, project)
+    dedupe_line = ""
+    if dedupe:
+        utils = project / f"{SCRIPTS[arm]}utils.py"
+        utils.write_text(utils.read_text() + LATEST_ENTRIES)
+    if arm in {"messy", "messy-git"}:
+        if dedupe:
+            dedupe_line = "participants = latest_entries(participants)\n"
+        prepare = project / "prepare_data.py"
+        replace_once(
+            prepare,
+            "from utils import EDUCATION_LEVELS, clean_ids, eligible",
+            "from utils import EDUCATION_LEVELS, clean_ids, eligible"
+            + (", latest_entries" if dedupe else ""),
+        )
+        replace_once(
+            prepare,
+            'PARTICIPANTS = "data/raw/participants.csv"',
+            'PARTICIPANTS = ["data/raw/participants.csv",'
+            ' "data/raw/site_E_enrollment.csv"]',
+        )
+        replace_once(
+            prepare,
+            f'SESSIONS = "{build_history.SESSIONS_V2}"',
+            f'SESSIONS = ["{build_history.SESSIONS_V2}",'
+            ' "data/raw/site_E_sessions.csv"]',
+        )
+        old, new = FLAT_READ
+        replace_once(prepare, old, new.replace("@DEDUPE@", dedupe_line))
+        return
+    if dedupe:
+        dedupe_line = "    participants = utils.latest_entries(participants)\n"
+    prepare = project / "scripts/prepare_data.py"
+    for edit in NARGS:
+        replace_once(prepare, *edit)
+    old, new = CAREFUL_READ
+    replace_once(prepare, old, new.replace("@DEDUPE@", dedupe_line))
+    if arm == "make":
+        makefile = project / "Makefile"
+        replace_once(
+            makefile,
+            "RAW := data/raw/participants.csv data/raw/sessions.csv",
+            "RAW := data/raw/participants.csv data/raw/sessions.csv \\\n"
+            "\tdata/raw/site_E_enrollment.csv data/raw/site_E_sessions.csv",
+        )
+        replace_once(
+            makefile,
+            "--participants data/raw/participants.csv \\\n",
+            "--participants data/raw/participants.csv \\\n"
+            "\t\tdata/raw/site_E_enrollment.csv \\\n",
+        )
+        replace_once(
+            makefile,
+            "--sessions data/raw/sessions.csv --out $@",
+            "--sessions data/raw/sessions.csv data/raw/site_E_sessions.csv"
+            " --out $@",
+        )
+        return
+    from ruamel.yaml import YAML
+
+    yaml = YAML()
+    yaml.width = 10_000
+    path = project / "calkit.yaml"
+    config = yaml.load(path.read_text())
+    stage = config["pipeline"]["stages"]["prepare-data"]
+    for old, new in [
+        ("data/raw/participants.csv", "data/raw/site_E_enrollment.csv"),
+        ("data/raw/sessions.csv", "data/raw/site_E_sessions.csv"),
+    ]:
+        args = list(stage["args"])
+        stage["args"].insert(args.index(old) + 1, new)
+        stage["inputs"].insert(list(stage["inputs"]).index(old) + 1, new)
+    with open(path, "w") as f:
+        yaml.dump(config, f)
+
+
 def update_abstract(project: Path, prefix: str) -> None:
     """Retype the conference abstract's numbers from the results."""
     ancova = json.loads((project / f"{prefix}ancova.json").read_text())
@@ -270,13 +455,21 @@ def update_abstract(project: Path, prefix: str) -> None:
 
 
 def solve_messy(
-    run_dir: Path, project: Path, arm: str, task: str, env: dict
+    run_dir: Path,
+    project: Path,
+    arm: str,
+    task: str,
+    env: dict,
+    dedupe: bool = True,
+    retype: bool = True,
 ) -> None:
     """Edit the code, rerun the current scripts and figure notebook, and
     retype the draft and the abstract.
     """
     venv = run_dir / "venv"
     state = run_dir / "solution-state"
+    if task == "add-site":
+        add_site(run_dir, project, arm, dedupe)
     if task == "data-correction":
         shutil.copy2(run_dir / "incoming" / CORRECTED, project / "data/raw")
         replace_once(
@@ -292,6 +485,8 @@ def solve_messy(
         (project / "fit_by_sex.py").write_text(BY_SEX_SCRIPT)
         (project / "run_all.sh").write_text(RUN_ALL)
         run(["bash", "run_all.sh"], project, env)
+    if not retype:
+        return
     max_age = 80 if task == "undo" else 85
     template = build_history.get_report_template(85, True, True)
     type_report(
@@ -446,10 +641,14 @@ def solve_careful(
     task: str,
     env: dict,
     abstract: bool = True,
+    dedupe: bool = True,
+    methods: bool = True,
 ) -> None:
     """Edit the code and the report template, or revert a commit, rerun
     the pipeline its own way, retype the abstract, and commit.
     """
+    if task == "add-site":
+        add_site(run_dir, project, arm, dedupe)
     if task == "new-question":
         (add_calkit_by_sex if arm == "calkit" else add_make_by_sex)(project)
         script = project / "scripts/write_report.py"
@@ -466,7 +665,8 @@ def solve_careful(
     else:
         edit_code(project, arm, task)
         template = project / "report_template.md"
-        template.write_text(edit_template(template.read_text(), task))
+        if methods:
+            template.write_text(edit_template(template.read_text(), task))
     # A fresh clone's timestamps say nothing, so stale-clone forces a rerun
     run_careful(arm, project, env, force=task == "stale-clone")
     if abstract and (project / arms.DISTANT).exists():
@@ -651,7 +851,8 @@ def git_env(env: dict) -> dict:
 def get_context(run_dir: Path) -> tuple[dict, str, str, Path, dict]:
     run_dir = run_dir.resolve()
     meta = json.loads((run_dir / "meta.json").read_text())
-    arm, task = meta["arm"], meta["task"]
+    # An intervention arm is solved as its base arm is
+    arm, task = arms.get_base(meta["arm"]), meta["task"]
     project = run_dir / "project"
     venv = run_dir / "venv" if arm != "calkit" else None
     env = arms.get_env(venv, run_dir / "solution-state")
@@ -700,6 +901,11 @@ def apply_flaw(run_dir: Path, flaw: str) -> None:
     - incremental-only: make in a fresh clone, which sees nothing to do
     - wrong-draft: changes explained against the first draft, not the
       submitted one
+    - site-e-duplicates: site E added, but both of a re-entered
+      participant's records kept, the silent mistake
+    - site-e-report-stale: site E added and the analysis rerun, but the
+      report not updated: a typed draft not retyped, or a generated report
+      whose Methods still count four sites
     """
     run_dir = run_dir.resolve()
     meta, arm, task, project, env = get_context(run_dir)
@@ -812,6 +1018,18 @@ def apply_flaw(run_dir: Path, flaw: str) -> None:
         run(["make"], project, env)
     elif flaw == "wrong-draft":
         solve_regression(project, flaw)
+    elif flaw == "site-e-duplicates":
+        if arm == "none":
+            solve_none(run_dir, project, task, env, dedupe=False)
+        elif arm in {"messy", "messy-git"}:
+            solve_messy(run_dir, project, arm, task, env, dedupe=False)
+        else:
+            solve_careful(run_dir, project, arm, task, env, dedupe=False)
+    elif flaw == "site-e-report-stale":
+        if arm in {"messy", "messy-git"}:
+            solve_messy(run_dir, project, arm, task, env, retype=False)
+        else:
+            solve_careful(run_dir, project, arm, task, env, methods=False)
     else:
         raise ValueError(flaw)
 

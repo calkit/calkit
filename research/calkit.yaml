@@ -331,7 +331,9 @@ questions:
       Give a headless coding agent one task in a fresh copy of each arm's
       template, the same analysis kept five ways (a plain folder, a messy
       folder with and without Git, a Makefile project, and a Calkit
-      project), and grade the project it leaves with deterministic checks:
+      project; the arms given guidance to check results, below, aren't
+      counted here), and grade the project it leaves with deterministic
+      checks:
       the report's numbers and figure match the task's reference end state
       (correct), rerunning the project changes nothing (consistent), no raw
       data, history, or unrelated file is harmed (damage), and the report's
@@ -398,8 +400,9 @@ questions:
       In every trial whose task isn't fixing it, check whether the agent's
       final message mentions the planted silent error, the merge dropping
       site D because its participant IDs aren't zero-padded, by a strict,
-      case-sensitive pattern, and compare the messy arms with the rest by a
-      one-sided Fisher exact test.
+      case-sensitive pattern, and compare the messy arms with the others
+      not given guidance to check results (below) by a one-sided Fisher
+      exact test.
     answer:
       if rest == 0 and messy > 0 and p < 0.01: >-
         No, by this measure. Agents mentioned site D's dropped participants
@@ -432,6 +435,83 @@ questions:
           make_n: noticing.arms.make.n
           calkit: noticing.arms.calkit.noticed
           calkit_n: noticing.arms.calkit.n
+      - kind: table
+        path: results/agent-reliability.md
+
+  # TODO: needs human review
+  - question: >-
+      Does Calkit's guidance make agents check results they weren't asked
+      about, and is it Calkit or the instruction?
+    approach: >-
+      In batch 3, give two arms a few sentences of guidance to check each
+      stage's results before reporting done, comparing rows in and out of
+      each stage and the sample against the questions and Methods
+      (agent-reliability/interventions/check-results.md): calkit-hint, the
+      Calkit arm with the guidance patched into its agent plugin's
+      conventions skill, and make-hint, the Makefile arm with the same words
+      in its README. Run them with the calkit, make, and messy-git arms on
+      distant-consumer, data-correction, stale-clone, and add-site, which
+      adds a site whose enrollment export enters four participants twice,
+      and count final messages that mention site D's dropped participants
+      or, in add-site, site E's re-entered records. Compare calkit-hint with
+      calkit by a one-sided Fisher exact test, for whether the guidance
+      helps, and with make-hint by a two-sided one, for whether it matters
+      that Calkit's skill delivers it.
+    answer:
+      if hint_n == 0: >-
+        Not settled; batch 3 hasn't run yet.
+      elif (hint_d_p < 0.05 or hint_e_p < 0.05) and make_d_p >= 0.05 and make_e_p >= 0.05: >-
+        Yes, and so far the instruction does it, not Calkit. Given the
+        guidance in its skill, Calkit agents mentioned site D's dropped
+        participants in {hint_d}/{hint_d_n} trials and site E's re-entered
+        records in {hint_e}/{hint_e_n} add-site trials, against
+        {calkit_d}/{calkit_d_n} and {calkit_e}/{calkit_e_n} without it
+        (one-sided Fisher exact p = {hint_d_p:.2g} and {hint_e_p:.2g}).
+        Makefile agents given the same words in their README mentioned them
+        in {mh_d}/{mh_d_n} and {mh_e}/{mh_e_n} (two-sided p = {make_d_p:.2g}
+        and {make_e_p:.2g} against calkit-hint), so Calkit's part is
+        delivering the guidance without anyone writing it into the project.
+      elif (hint_d_p < 0.05 or hint_e_p < 0.05) and hint_d * mh_d_n + hint_e * mh_e_n > mh_d * hint_d_n + mh_e * hint_e_n: >-
+        Yes, and more through Calkit's skill than the same words in a
+        README. Given the guidance in its skill, Calkit agents mentioned
+        site D's dropped participants in {hint_d}/{hint_d_n} trials and site
+        E's re-entered records in {hint_e}/{hint_e_n} add-site trials,
+        against {calkit_d}/{calkit_d_n} and {calkit_e}/{calkit_e_n} without
+        it (one-sided Fisher exact p = {hint_d_p:.2g} and {hint_e_p:.2g}),
+        and Makefile agents given the words in their README in
+        {mh_d}/{mh_d_n} and {mh_e}/{mh_e_n} (two-sided p = {make_d_p:.2g}
+        and {make_e_p:.2g}).
+      elif hint_d_p >= 0.05 and hint_e_p >= 0.05: >-
+        Not detectably, with {hint_d_n} trials per arm. Given the guidance in
+        its skill, Calkit agents mentioned site D's dropped participants in
+        {hint_d}/{hint_d_n} trials and site E's re-entered records in
+        {hint_e}/{hint_e_n} add-site trials, against {calkit_d}/{calkit_d_n}
+        and {calkit_e}/{calkit_e_n} without it (one-sided Fisher exact p =
+        {hint_d_p:.2g} and {hint_e_p:.2g}); Makefile agents given the same
+        words in their README, {mh_d}/{mh_d_n} and {mh_e}/{mh_e_n}.
+      else: >-
+        Not settled; see results/agent-reliability.md for every trial.
+    evidence:
+      - kind: result
+        path: results/agent-reliability.json
+        values:
+          hint_n: noticing.interventions.arms.calkit-hint.n
+          hint_d: noticing.interventions.arms.calkit-hint.site_d.noticed
+          hint_d_n: noticing.interventions.arms.calkit-hint.site_d.n
+          hint_e: noticing.interventions.arms.calkit-hint.site_e.noticed
+          hint_e_n: noticing.interventions.arms.calkit-hint.site_e.n
+          calkit_d: noticing.interventions.arms.calkit.site_d.noticed
+          calkit_d_n: noticing.interventions.arms.calkit.site_d.n
+          calkit_e: noticing.interventions.arms.calkit.site_e.noticed
+          calkit_e_n: noticing.interventions.arms.calkit.site_e.n
+          mh_d: noticing.interventions.arms.make-hint.site_d.noticed
+          mh_d_n: noticing.interventions.arms.make-hint.site_d.n
+          mh_e: noticing.interventions.arms.make-hint.site_e.noticed
+          mh_e_n: noticing.interventions.arms.make-hint.site_e.n
+          hint_d_p: noticing.interventions.tests.hint_vs_calkit.site_d_p
+          hint_e_p: noticing.interventions.tests.hint_vs_calkit.site_e_p
+          make_d_p: noticing.interventions.tests.hint_vs_make_hint.site_d_p
+          make_e_p: noticing.interventions.tests.hint_vs_make_hint.site_e_p
       - kind: table
         path: results/agent-reliability.md
 
@@ -634,42 +714,49 @@ pipeline:
         Build each arm's starting project for the agent reliability
         benchmark, replaying one research history in the history arms, with
         the Calkit arm's commands run by Calkit at the commit pinned here,
-        into one archive, since the templates hold nested Git repos. Every
-        commit is the builder's, and times that would only say when the
-        build ran are fixed, so a rebuild gives the same bytes.
+        into one archive, since the templates hold nested Git repos, and the
+        files tasks hand agents: task 4's corrected participants file and
+        site E's exports. Every commit is the builder's, and times that
+        would only say when the build ran are fixed, so a rebuild gives the
+        same bytes.
       args:
         - 4718ca51d76e1d77b4b5d6c582167d697421203d
         - agent-reliability/templates.tar.gz
         - agent-reliability/templates.json
         - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+        - agent-reliability/incoming/site-e
       inputs:
         - agent-reliability/build
         - agent-reliability/bench/arms.py
         - agent-reliability/bench/archive.py
+        - agent-reliability/interventions
         - agent-reliability/versions.env
       outputs:
         - agent-reliability/templates.tar.gz
         - path: agent-reliability/templates.json
           storage: git
         - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+        - agent-reliability/incoming/site-e
     check-agent-reliability-templates:
       kind: shell-script
       script_path: agent-reliability/build/check_rebuild.sh
       environment: agent-reliability
       description: >-
         Rebuild the agent reliability templates from scratch and check the
-        archive and the incoming file match the build stage's byte for
+        archive and the incoming files match the build stage's byte for
         byte.
       args:
         - 4718ca51d76e1d77b4b5d6c582167d697421203d
         - agent-reliability/templates.json
         - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+        - agent-reliability/incoming/site-e
         - agent-reliability/templates-rebuild.json
       inputs:
         - from_stage_outputs: build-agent-reliability-templates
         - agent-reliability/build
         - agent-reliability/bench/arms.py
         - agent-reliability/bench/archive.py
+        - agent-reliability/interventions
         - agent-reliability/versions.env
       outputs:
         - path: agent-reliability/templates-rebuild.json
@@ -685,12 +772,14 @@ pipeline:
       args:
         - agent-reliability/templates.tar.gz
         - agent-reliability/incoming/participants_2026-05-20_corrected.csv
+        - agent-reliability/incoming/site-e
       inputs:
         - from_stage_outputs: build-agent-reliability-templates
         - agent-reliability/bench/arms.py
         - agent-reliability/bench/archive.py
         - agent-reliability/build/generate_data.py
         - agent-reliability/build/make_corrected_participants.py
+        - agent-reliability/build/make_site_e.py
         - agent-reliability/build/shared/make_figure.py
         - agent-reliability/build/history/make_figure_se.py
       outputs:
@@ -719,6 +808,7 @@ pipeline:
         - agent-reliability/build
         - agent-reliability/tasks
         - agent-reliability/preambles
+        - agent-reliability/interventions
         - agent-reliability/versions.env
       outputs:
         - path: agent-reliability/verification/summary.json
@@ -789,7 +879,12 @@ pipeline:
         Run the agent reliability trials batches/batch-3.csv lists, each a
         headless Claude Code session in a fresh copy of its arm's template,
         in a scratch folder outside the repo, with Calkit at the commit
-        pinned here. Frozen, since agent trials cost money; run with
+        pinned here: the calkit, make, and messy-git arms, and the
+        checking-guidance arms, calkit-hint (the agent plugin's conventions
+        skill patched with interventions/conventions-check-results.patch)
+        and make-hint (the same words in the README), on distant-consumer,
+        data-correction, stale-clone, and add-site, twice each, with
+        claude-opus-5-5. Frozen, since agent trials cost money; run with
         calkit run --force agent-reliability-batch-3.
       args:
         - batch-3
@@ -807,6 +902,7 @@ pipeline:
         - agent-reliability/build/snapshot_calkit.sh
         - agent-reliability/tasks
         - agent-reliability/preambles
+        - agent-reliability/interventions
         - agent-reliability/versions.env
       outputs:
         - agent-reliability/runs/batch-3
@@ -856,6 +952,29 @@ pipeline:
         - agent-reliability/versions.env
       outputs:
         - agent-reliability/grades/batch-2
+    grade-agent-reliability-batch-3:
+      kind: python-script
+      script_path: agent-reliability/bench/regrade.py
+      environment: agent-reliability
+      description: >-
+        Grade every archived run of agent reliability batch-3 with the current
+        graders, each rerun with the Calkit its trial used.
+      args:
+        - batch-3
+        - --jobs=8
+      inputs:
+        - from_stage_outputs: agent-reliability-batch-3
+        - from_stage_outputs: build-agent-reliability-reference
+        - agent-reliability/bench/arms.py
+        - agent-reliability/bench/archive.py
+        - agent-reliability/bench/grade.py
+        - agent-reliability/bench/new_run.py
+        - agent-reliability/bench/report.py
+        - agent-reliability/build/shared/make_figure.py
+        - agent-reliability/build/snapshot_calkit.sh
+        - agent-reliability/versions.env
+      outputs:
+        - agent-reliability/grades/batch-3
     summarize-agent-reliability:
       kind: python-script
       script_path: agent-reliability/bench/summarize.py
@@ -863,15 +982,20 @@ pipeline:
       description: >-
         Tally every graded agent reliability batch by arm and task, with
         cost, time, and turns, unprompted mentions of site D's dropped
-        participants, and tool inputs reaching outside each run.
+        participants and of site E's re-entered records, the checking
+        guidance's effect on them, and tool inputs reaching outside each
+        run.
       args:
         - batch-1
         - batch-2
+        - batch-3
       inputs:
         - from_stage_outputs: import-agent-reliability-batch-1
         - from_stage_outputs: import-agent-reliability-batch-2
+        - from_stage_outputs: agent-reliability-batch-3
         - from_stage_outputs: grade-agent-reliability-batch-1
         - from_stage_outputs: grade-agent-reliability-batch-2
+        - from_stage_outputs: grade-agent-reliability-batch-3
         - agent-reliability/templates.json
         - agent-reliability/bench/arms.py
       outputs:

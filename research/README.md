@@ -108,9 +108,13 @@ arm's project, graded by deterministic checks.
   `agent-reliability/batches/batch-<n>.csv`
 - `agent-reliability/grades/batch-<n>/`: every trial graded by the current
   graders, so a grader fix regrades without rerunning agents
+- `agent-reliability/interventions/`: guidance to check results, which
+  batch 3 gives one Calkit arm through its agent plugin's skill and one
+  Makefile arm through its README
 - `results/agent-reliability.json` and `.md`: passes by arm and task, cost
-  and time, unprompted mentions of the site the merge drops, and tool
-  inputs that reached outside a trial's folder
+  and time, unprompted mentions of the site the merge drops and of a new
+  site's repeated records, the guidance's effect on them, and tool inputs
+  that reached outside a trial's folder
 
 <!-- TODO: needs human review -->
 

@@ -47,9 +47,17 @@ CONTROLS = [
     ("messy-git", "undo", "bundled-revert"),
     ("make", "stale-clone", "incremental-only"),
     ("messy", "regression", "wrong-draft"),
+    ("calkit", "add-site", "site-e-duplicates"),
+    ("make-hint", "add-site", "site-e-duplicates"),
+    ("messy-git", "add-site", "site-e-duplicates"),
+    ("make", "add-site", "site-e-report-stale"),
+    ("calkit-hint", "add-site", "site-e-report-stale"),
+    ("messy-git", "add-site", "site-e-report-stale"),
 ]
 KEYS = [
     "correct",
+    "methods_sites",
+    "site_e",
     "n_stale",
     "n_unrequested_change",
     "distant",
@@ -75,13 +83,17 @@ def check(arm: str, task: str, variant: str, scratch: Path) -> dict:
         run, out=OUT / "grades" / f"{name}.json", work_root=scratch / "grading"
     )
     shutil.rmtree(run)
-    return {
+    row = {
         "arm": arm,
         "task": task,
         "variant": variant,
         "solution_error": error,
         **{k: result["summary"].get(k) for k in KEYS},
     }
+    # How add-site's grade read the Methods and site E's records
+    checks = result["correct"].get("checks", {})
+    row["methods_sites"] = checks.get("methods_states_sites")
+    return row
 
 
 def main() -> None:

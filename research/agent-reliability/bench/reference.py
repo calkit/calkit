@@ -5,11 +5,13 @@ participants file), checks it matches the templates byte for byte, then
 runs a reference implementation of the analysis with each task's change.
 The planted bugs other than the one a task names stay in, since they're
 part of the starting state: site D is dropped except in fix-merge, and
-education's reference level stays college everywhere.
+education's reference level stays college everywhere. add-site's site E
+is added correctly: one record per participant, the latest entered.
 
 Writes reference/<task>/expected.json, analysis.csv, and score_by_week.png.
 
 Usage: python bench/reference.py <templates archive> <incoming file>
+    <site E dir>
 """
 
 import argparse
@@ -41,6 +43,7 @@ TASKS = [
     "stale-clone",
     "provenance",
     "regression",
+    "add-site",
 ]
 # Tasks whose figure is the submitted draft's, with standard-error bars
 SE_FIGURE = {"provenance"}
@@ -54,6 +57,15 @@ EDUCATION_LEVELS = ["secondary", "college", "graduate"]
 
 def get_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def get_latest_entries(participants: pd.DataFrame) -> pd.DataFrame:
+    """One record per participant, the latest entered, without the entry
+    dates, as site E's codebook says.
+    """
+    latest = participants.sort_values("entered_on", kind="stable")
+    latest = latest.drop_duplicates("participant_id", keep="last")
+    return latest.drop(columns="entered_on").sort_index()
 
 
 def prepare(
@@ -173,10 +185,35 @@ def fit_by_sex(df: pd.DataFrame) -> dict:
     return out
 
 
+def get_site_e_records(enrollment: pd.DataFrame) -> dict:
+    """Site E's re-entered participants' first and latest entries, to
+    tell how an agent's analysis table handled them.
+    """
+    columns = ["age", "sex", "education"]
+    repeated = enrollment[enrollment["participant_id"].duplicated(keep=False)]
+    records = {}
+    for pid, rows in repeated.sort_values("entered_on").groupby(
+        "participant_id"
+    ):
+        records[pid] = {
+            which: {c: str(row[c]) for c in columns}
+            for which, row in [
+                ("first", rows.iloc[0]),
+                ("latest", rows.iloc[-1]),
+            ]
+        }
+    return {
+        "n_participants": int(enrollment["participant_id"].nunique()),
+        "n_records": len(enrollment),
+        "reentered": records,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("templates_archive", type=Path)
     parser.add_argument("incoming", type=Path)
+    parser.add_argument("site_e", type=Path)
     args = parser.parse_args()
     tmp = Path(tempfile.mkdtemp())
     templates = tmp / "templates"
@@ -199,8 +236,21 @@ def main() -> None:
         ],
         check=True,
     )
+    site_e = tmp / "site-e"
+    subprocess.run(
+        [
+            *py,
+            str(BUILD / "make_site_e.py"),
+            "--out-dir",
+            str(site_e),
+        ],
+        check=True,
+        capture_output=True,
+    )
     # The regenerated files must be the ones the agents receive
     assert get_sha256(corrected) == get_sha256(args.incoming)
+    for f in sorted(site_e.iterdir()):
+        assert get_sha256(f) == get_sha256(args.site_e / f.name), f.name
     for generated, received in [
         ("participants.csv", "calkit/data/raw/participants.csv"),
         ("participants.csv", "messy/data/raw/participants.csv"),
@@ -226,6 +276,12 @@ def main() -> None:
     sessions = pd.read_csv(tmp / "sessions_v2.csv", **read)
     sessions_v1 = pd.read_csv(tmp / "sessions_v1.csv", **read)
     corrected = pd.read_csv(corrected, **read)
+    enrollment_e = pd.read_csv(site_e / "site_E_enrollment.csv", **read)
+    sessions_e = pd.read_csv(site_e / "site_E_sessions.csv", **read)
+    with_e = pd.concat(
+        [participants, get_latest_entries(enrollment_e)], ignore_index=True
+    )
+    sessions_with_e = pd.concat([sessions, sessions_e], ignore_index=True)
     # The history arms' states: submitted (original export, ages 60-80),
     # then the corrected export, then ages 60-85, which is the baseline
     options = {
@@ -239,6 +295,7 @@ def main() -> None:
         "stale-clone": {},
         "provenance": {"ages": (60, 80), "sessions": sessions_v1},
         "regression": {},
+        "add-site": {"participants": with_e, "sessions": sessions_with_e},
         # Intermediate states, not tasks
         "_export-first": {"ages": (60, 80)},
         "_ages-first": {"sessions": sessions_v1},
@@ -293,6 +350,8 @@ def main() -> None:
             )
         if task == "new-question":
             expected["by_sex"] = fit_by_sex(df)
+        if task == "add-site":
+            expected["site_e"] = get_site_e_records(enrollment_e)
         # The task done while also fixing other planted bugs, to diagnose
         # numbers that miss the reference
         alternatives = {}

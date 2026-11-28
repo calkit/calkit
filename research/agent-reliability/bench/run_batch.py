@@ -5,8 +5,9 @@ snapshots Calkit at the given commit into a scratch folder outside the repo
 (AGENT_RELIABILITY_SCRATCH, or a temporary one), so agents can't read the
 reference answers, and runs each trial there as its own headless Claude Code
 session in the run's project: only project settings (so no user plugins,
-CLAUDE.md, or memories), auto permission mode, and, for the Calkit arm only,
-the agent plugin from the snapshot. Grading is separate
+CLAUDE.md, or memories), auto permission mode, and, for the Calkit arms
+only, the agent plugin from the snapshot, which for calkit-hint has the
+checking guidance patched into its conventions skill. Grading is separate
 (bench/regrade.py), so a grader fix doesn't rerun agents.
 
 The batch's archive has manifest.csv, a copy of the manifest, and each
@@ -96,6 +97,8 @@ def main() -> None:
         plugin = []
         if arm == "calkit":
             plugin = ["--plugin-dir", str(scratch / "calkit" / "plugin")]
+        elif arm == "calkit-hint":
+            plugin = ["--plugin-dir", str(scratch / "calkit" / "plugin-hint")]
         claude = [
             "claude",
             "-p",
@@ -168,6 +171,9 @@ def main() -> None:
         os.environ["BENCH_TEMPLATES"] = str(scratch / "templates")
         os.environ["BENCH_CALKIT"] = arms.snapshot_calkit(
             args.calkit_rev, scratch / "calkit"
+        )
+        arms.patch_plugin(
+            scratch / "calkit" / "plugin", scratch / "calkit" / "plugin-hint"
         )
         calkit_rev = subprocess.run(
             ["git", "rev-parse", "--verify", f"{args.calkit_rev}^{{commit}}"],

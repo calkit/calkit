@@ -12,6 +12,7 @@ handle, so its inner join drops site D.
 
 import argparse
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -23,10 +24,56 @@ EDUCATION_P = {"A": [0.40, 0.35, 0.25], "D": [0.65, 0.25, 0.10]}
 EDUCATION_SHIFT = {"secondary": 0.0, "college": 1.5, "graduate": 4.0}
 # Extra gain by week 12, larger with more education
 EDUCATION_GAIN = {"secondary": 0.0, "college": 2.5, "graduate": 4.5}
-# Training effect at week 12, larger at site D, whose staff coached sessions
-EFFECT = {"A": 3.0, "B": 3.0, "C": 3.0, "D": 7.0}
+# Training effect at week 12, larger at site D, whose staff coached
+# sessions; site E joins later (build/make_site_e.py)
+EFFECT = {"A": 3.0, "B": 3.0, "C": 3.0, "D": 7.0, "E": 3.0}
 WEEKS = [0, 4, 8, 12]
 FORM_B_KEY_ERROR = -2.5
+
+
+def simulate_sessions(p: Any, rng: np.random.Generator) -> list[dict]:
+    """One participant's assessment sessions, as their site exports them."""
+    sessions = []
+    u = rng.normal(0.0, 7.0)
+    age_c = p.age - 72
+    treated = p.arm == "training"
+    # Dropout: about 6% miss week 12, half of those also week 8
+    last_week = 12
+    if rng.random() < 0.06:
+        last_week = 8 if rng.random() < 0.5 else 4
+    for week in WEEKS:
+        if week > last_week:
+            continue
+        true = (
+            50.0
+            + EDUCATION_SHIFT[p.education]
+            + u
+            - 0.25 * age_c
+            - (0.1 / 12) * age_c * week
+            + 0.1 * week
+            + EDUCATION_GAIN[p.education] * week / 12
+            + treated * EFFECT[p.site] * week / 12
+            + rng.normal(0.0, 4.0)
+        )
+        form = "A" if rng.random() < 0.5 else "B"
+        complete = rng.random() > 0.015
+        date = p.enrolled_on + np.timedelta64(
+            7 * week + int(rng.integers(-2, 3)) + 2, "D"
+        )
+        pid = p.participant_id
+        if p.site == "D":
+            pid = f"D-{int(pid.split('-')[1])}"
+        sessions.append(
+            {
+                "participant_id": pid,
+                "week": week,
+                "session_date": date,
+                "form": form,
+                "status": "complete" if complete else "incomplete",
+                "score_true": round(true, 1) if complete else np.nan,
+            }
+        )
+    return sessions
 
 
 def main() -> None:
@@ -62,45 +109,7 @@ def main() -> None:
     # Sessions
     sessions = []
     for p in participants.itertuples():
-        u = rng.normal(0.0, 7.0)
-        age_c = p.age - 72
-        treated = p.arm == "training"
-        # Dropout: about 6% miss week 12, half of those also week 8
-        last_week = 12
-        if rng.random() < 0.06:
-            last_week = 8 if rng.random() < 0.5 else 4
-        for week in WEEKS:
-            if week > last_week:
-                continue
-            true = (
-                50.0
-                + EDUCATION_SHIFT[p.education]
-                + u
-                - 0.25 * age_c
-                - (0.1 / 12) * age_c * week
-                + 0.1 * week
-                + EDUCATION_GAIN[p.education] * week / 12
-                + treated * EFFECT[p.site] * week / 12
-                + rng.normal(0.0, 4.0)
-            )
-            form = "A" if rng.random() < 0.5 else "B"
-            complete = rng.random() > 0.015
-            date = p.enrolled_on + np.timedelta64(
-                7 * week + int(rng.integers(-2, 3)) + 2, "D"
-            )
-            pid = p.participant_id
-            if p.site == "D":
-                pid = f"D-{int(pid.split('-')[1])}"
-            sessions.append(
-                {
-                    "participant_id": pid,
-                    "week": week,
-                    "session_date": date,
-                    "form": form,
-                    "status": "complete" if complete else "incomplete",
-                    "score_true": round(true, 1) if complete else np.nan,
-                }
-            )
+        sessions += simulate_sessions(p, rng)
     sessions = pd.DataFrame(sessions)
     sessions = sessions.sort_values(
         ["session_date", "participant_id"], kind="stable"

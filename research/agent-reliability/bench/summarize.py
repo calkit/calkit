@@ -9,7 +9,11 @@ from each run's transcript. Also:
   dropped participants (IDs without zero padding, so the merge loses the
   site), unprompted, in the agent's final message, by a strict,
   case-sensitive pattern, with a one-sided Fisher exact test of the messy
-  arms against the rest
+  arms against the others without the checking guidance; and whether an
+  add-site trial's final message mentions site E's re-entered records
+- interventions: noticing per arm in the batches the checking-guidance
+  arms ran in, with Fisher exact tests of calkit-hint against calkit
+  (one-sided: more) and against make-hint (two-sided)
 - isolation: tool inputs that mention the benchmark itself (this folder,
   its reference answers, the audit studies) or any absolute path outside
   the run's own folder and the Calkit snapshot it was given
@@ -22,6 +26,7 @@ Usage: python bench/summarize.py <batch> [<batch> ...]
 import argparse
 import json
 import re
+from collections import Counter
 from pathlib import Path
 
 import arms
@@ -30,9 +35,23 @@ from scipy.stats import fisher_exact
 ROOT = arms.ROOT
 RESULTS = ROOT.parent / "results"
 CHECKS = ("correct", "consistent", "damage", "traceable", "distant")
-ARMS = ["none", "messy", "messy-git", "make", "calkit"]
+ARMS = [
+    "none",
+    "messy",
+    "messy-git",
+    "make",
+    "make-hint",
+    "calkit",
+    "calkit-hint",
+]
 MESSY = {"messy", "messy-git"}
+INTERVENTION_ARMS = ["messy-git", "make", "make-hint", "calkit", "calkit-hint"]
 NOTICE = re.compile(r"site D|leading zero|zero-pad|\bD-\d+")
+# Site E's planted problem: four participants entered twice
+NOTICE_SITE_E = re.compile(
+    r"[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b"
+    r"|entered (?:twice|again)|entered_on|(?:latest|most recent) (?:entry|record)"
+)
 BENCHMARK = re.compile(
     r"agent-reliability/(?!envs/calkit-)|/reference/|audit-compare"
     r"|audit-private|" + re.escape(str(arms.CALKIT_REPO)) + r"(?![\w-])"
@@ -52,6 +71,9 @@ def read_transcript(path: Path, allowed: list[str]) -> dict:
         "final_message": None,
         "benchmark_access": [],
         "outside_paths": set(),
+        # Where the checking guidance would reach the agent, if given
+        "loaded_conventions": False,
+        "named_readme": False,
     }
     for line in path.read_text().splitlines():
         e = json.loads(line)
@@ -61,6 +83,10 @@ def read_transcript(path: Path, allowed: list[str]) -> dict:
                     continue
                 text = json.dumps(c["input"])
                 out["benchmark_access"] += BENCHMARK.findall(text)
+                if c.get("name") == "Skill" and "conventions" in text:
+                    out["loaded_conventions"] = True
+                if re.search(r"(?<![\w/])README\.md", text):
+                    out["named_readme"] = True
                 for m in ABS_PATH.finditer(text):
                     p = m.group(0).rstrip(".,:")
                     if not any(
@@ -91,7 +117,12 @@ def read_run(batch: str, run: Path, templates: dict) -> dict:
     noticed = None
     if meta["task"] != "fix-merge" and t["final_message"] is not None:
         noticed = sorted(set(NOTICE.findall(t["final_message"])))
-    key = ("stale/" if meta["task"] == "stale-clone" else "") + meta["arm"]
+    noticed_e = None
+    if meta["task"] == "add-site" and t["final_message"] is not None:
+        noticed_e = sorted(set(NOTICE_SITE_E.findall(t["final_message"])))
+    key = ("stale/" if meta["task"] == "stale-clone" else "") + (
+        arms.get_template_name(meta["arm"])
+    )
     current = templates[key]
     start = meta["template_manifest"]
     row = {
@@ -112,8 +143,13 @@ def read_run(batch: str, run: Path, templates: dict) -> dict:
         "turns": t["turns"],
         "noticed_site_d": None if noticed is None else bool(noticed),
         "notice_matches": noticed,
+        "noticed_site_e": None if noticed_e is None else bool(noticed_e),
+        "notice_site_e_matches": noticed_e,
+        "site_e": grade["summary"].get("site_e"),
         "benchmark_access": t["benchmark_access"],
         "outside_paths": t["outside_paths"],
+        "loaded_conventions": t["loaded_conventions"],
+        "named_readme": t["named_readme"],
         "template": {
             "no_git": meta["template_git_head"] is None,
             "same_git_head": meta["template_git_head"] == current["git_head"],
@@ -155,12 +191,21 @@ def tally(rows: list[dict]) -> dict:
     }
 
 
-def count_noticed(rows: list[dict]) -> dict:
-    decided = [r for r in rows if r["noticed_site_d"] is not None]
-    return {
-        "noticed": sum(r["noticed_site_d"] for r in decided),
-        "n": len(decided),
-    }
+def count_noticed(rows: list[dict], key: str = "noticed_site_d") -> dict:
+    decided = [r for r in rows if r[key] is not None]
+    return {"noticed": sum(r[key] for r in decided), "n": len(decided)}
+
+
+def test_noticed(a: dict, b: dict, alternative: str) -> float:
+    """Fisher exact p of arm a noticing more than (or other than) arm b."""
+    _, p = fisher_exact(
+        [
+            [a["noticed"], a["n"] - a["noticed"]],
+            [b["noticed"], b["n"] - b["noticed"]],
+        ],
+        alternative=alternative,
+    )
+    return float(p)
 
 
 def main() -> None:
@@ -212,19 +257,65 @@ def main() -> None:
                 t: count_noticed([r for r in a if r["task"] == t])
                 for t in tasks
             },
+            "site_e": count_noticed(a, "noticed_site_e"),
         }
+    # The messy arms against the others the guidance wasn't given to
     messy = count_noticed([r for r in rows if r["arm"] in MESSY])
-    rest = count_noticed([r for r in rows if r["arm"] not in MESSY])
-    _, p = fisher_exact(
-        [
-            [messy["noticed"], messy["n"] - messy["noticed"]],
-            [rest["noticed"], rest["n"] - rest["noticed"]],
-        ],
-        alternative="greater",
+    rest = count_noticed(
+        [r for r in rows if r["arm"] not in MESSY | set(arms.BASES)]
     )
-    noticing.update(messy=messy, rest=rest, fisher_p_one_sided=float(p))
+    noticing.update(
+        messy=messy,
+        rest=rest,
+        fisher_p_one_sided=test_noticed(messy, rest, "greater"),
+        site_e_pattern=NOTICE_SITE_E.pattern,
+    )
     noticing["runs"] = {
         r["run"]: r["notice_matches"] for r in rows if r["noticed_site_d"]
+    }
+    noticing["runs_site_e"] = {
+        r["run"]: r["notice_site_e_matches"]
+        for r in rows
+        if r["noticed_site_e"]
+    }
+    # The checking guidance, within the batches its arms ran in, so every
+    # arm compared took the same tasks
+    batches = sorted({r["batch"] for r in rows if r["arm"] in arms.BASES})
+    compared = [r for r in rows if r["batch"] in batches]
+    guidance_arms: dict[str, dict] = {}
+    for arm in INTERVENTION_ARMS:
+        a = [r for r in compared if r["arm"] == arm]
+        add_site = [r for r in a if r["task"] == "add-site"]
+        guidance_arms[arm] = {
+            "n": len(a),
+            "n_loaded_conventions": sum(r["loaded_conventions"] for r in a),
+            "n_named_readme": sum(r["named_readme"] for r in a),
+            "site_d": count_noticed(a),
+            "site_e": count_noticed(a, "noticed_site_e"),
+            "add_site_correct": {
+                "pass": sum(r["correct"] is True for r in add_site),
+                "n": sum(r["correct"] is not None for r in add_site),
+            },
+            "site_e_handling": dict(
+                Counter(r["site_e"] or "unknown" for r in add_site)
+            ),
+        }
+    tests: dict[str, dict] = {}
+    for name, other, alternative in [
+        ("hint_vs_calkit", "calkit", "greater"),
+        ("hint_vs_make_hint", "make-hint", "two-sided"),
+    ]:
+        tests[name] = {"vs": other, "alternative": alternative}
+        for measure in ["site_d", "site_e"]:
+            tests[name][f"{measure}_p"] = test_noticed(
+                guidance_arms["calkit-hint"][measure],
+                guidance_arms[other][measure],
+                alternative,
+            )
+    noticing["interventions"] = {
+        "batches": batches,
+        "arms": guidance_arms,
+        "tests": tests,
     }
     isolation = {
         "n_benchmark_access": sum(bool(r["benchmark_access"]) for r in rows),
@@ -244,7 +335,9 @@ def main() -> None:
         for r in rows:
             if r["batch"] != batch:
                 continue
-            key = ("stale/" if r["task"] == "stale-clone" else "") + r["arm"]
+            key = ("stale/" if r["task"] == "stale-clone" else "") + (
+                arms.get_template_name(r["arm"])
+            )
             starting[batch].setdefault(key, r["template"])
     summary = {
         "batches": args.batches,
@@ -337,9 +430,47 @@ def format_markdown(s: dict) -> str:
         lines.append(f"| {arm} | all | {a['noticed']}/{a['n']} |")
     lines += [
         "",
-        f"Messy arms {n['messy']['noticed']}/{n['messy']['n']}, the rest"
+        f"Messy arms {n['messy']['noticed']}/{n['messy']['n']}, the others"
+        " without the checking guidance"
         f" {n['rest']['noticed']}/{n['rest']['n']}; one-sided Fisher exact"
         f" p = {n['fisher_p_one_sided']:.2g}.",
+        "",
+        "## Checking guidance",
+        "",
+        "In the batches the checking-guidance arms ran in"
+        f" ({', '.join(n['interventions']['batches']) or 'none yet'}):"
+        " site D noticed as above, and site E's re-entered records"
+        " noticed in add-site trials whose final message matches"
+        f" `{n['site_e_pattern']}`. Skill: trials that loaded the"
+        " conventions skill, where calkit-hint's guidance is. README:"
+        " trials whose tool inputs name README.md, where make-hint's is."
+        " Site E handling: how the analysis table holds site E's"
+        " re-entered participants.",
+        "",
+        "| Arm | Trials | Skill | README | Site D noticed | Site E noticed"
+        " | add-site correct | Site E handling |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    ]
+    for arm, a in n["interventions"]["arms"].items():
+        handling = ", ".join(
+            f"{k} {v}" for k, v in sorted(a["site_e_handling"].items())
+        )
+        lines.append(
+            f"| {arm} | {a['n']} | {a['n_loaded_conventions']}"
+            f" | {a['n_named_readme']}"
+            f" | {a['site_d']['noticed']}/{a['site_d']['n']}"
+            f" | {a['site_e']['noticed']}/{a['site_e']['n']}"
+            f" | {a['add_site_correct']['pass']}/{a['add_site_correct']['n']}"
+            f" | {handling or '–'} |"
+        )
+    lines += ["", "| calkit-hint against | Test | Site D p | Site E p |"]
+    lines.append("| --- | --- | ---: | ---: |")
+    for test in n["interventions"]["tests"].values():
+        lines.append(
+            f"| {test['vs']} | Fisher exact, {test['alternative']}"
+            f" | {test['site_d_p']:.2g} | {test['site_e_p']:.2g} |"
+        )
+    lines += [
         "",
         "## Isolation",
         "",

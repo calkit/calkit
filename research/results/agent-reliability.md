@@ -94,7 +94,24 @@ Trials whose task isn't fix-merge whose final message matches `site D|leading ze
 | calkit | undo | 0/2 |
 | calkit | all | 0/16 |
 
-Messy arms 9/22, the rest 0/38; one-sided Fisher exact p = 3.4e-05.
+Messy arms 9/22, the others without the checking guidance 0/38; one-sided Fisher exact p = 3.4e-05.
+
+## Checking guidance
+
+In the batches the checking-guidance arms ran in (none yet): site D noticed as above, and site E's re-entered records noticed in add-site trials whose final message matches `[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b|entered (?:twice|again)|entered_on|(?:latest|most recent) (?:entry|record)`. Skill: trials that loaded the conventions skill, where calkit-hint's guidance is. README: trials whose tool inputs name README.md, where make-hint's is. Site E handling: how the analysis table holds site E's re-entered participants.
+
+| Arm | Trials | Skill | README | Site D noticed | Site E noticed | add-site correct | Site E handling |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| messy-git | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
+| make | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
+| make-hint | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
+| calkit | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
+| calkit-hint | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
+
+| calkit-hint against | Test | Site D p | Site E p |
+| --- | --- | ---: | ---: |
+| calkit | Fisher exact, greater | 1 | 1 |
+| make-hint | Fisher exact, two-sided | 1 | 1 |
 
 ## Isolation
 

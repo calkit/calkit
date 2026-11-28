@@ -26,9 +26,9 @@ ROOT = arms.ROOT
 
 
 def get_calkit_rev(run: Path) -> str | None:
-    """The Calkit commit a run's trial used, if its arm is calkit."""
+    """The Calkit commit a run's trial used, if its arm is a Calkit arm."""
     meta = json.loads((run / "meta.json").read_text())
-    if meta["arm"] != "calkit":
+    if arms.get_base(meta["arm"]) != "calkit":
         return None
     if meta.get("calkit_rev"):
         return str(meta["calkit_rev"])
@@ -44,7 +44,7 @@ def regrade(run: Path, out: Path, scratch: Path, calkit: dict) -> dict:
                 shutil.copy2(f, work / f.name)
         archive.unpack(run / "project.tgz", work / "project")
         meta = json.loads((work / "meta.json").read_text())
-        if meta["arm"] == "calkit":
+        if arms.get_base(meta["arm"]) == "calkit":
             meta["calkit_command"] = calkit[str(get_calkit_rev(run))]
             (work / "meta.json").write_text(json.dumps(meta, indent=2))
         else:

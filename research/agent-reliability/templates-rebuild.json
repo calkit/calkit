@@ -1,7 +1,17 @@
 {
-  "archive_sha256": "41dd5b58e05fb9c4db31d7d02770dc82866fdb378325ed7e9fa060571847123c",
-  "rebuilt_archive_sha256": "41dd5b58e05fb9c4db31d7d02770dc82866fdb378325ed7e9fa060571847123c",
+  "archive_sha256": "fb32a561e24cadad4e93c5ac69701a9f732822b92c7a001cb75e172fa9335ca0",
+  "rebuilt_archive_sha256": "fb32a561e24cadad4e93c5ac69701a9f732822b92c7a001cb75e172fa9335ca0",
   "incoming_sha256": "71dc7dff47ec0b372cbb13859d849f2e3dc233042028bd1466317cda299dd5c7",
   "rebuilt_incoming_sha256": "71dc7dff47ec0b372cbb13859d849f2e3dc233042028bd1466317cda299dd5c7",
+  "site_e_sha256": {
+    "site_E_codebook.md": "d8eccc8eeeb31fcca24b27e977468c88d9a34223a793e9f895e0fe6b406873f0",
+    "site_E_enrollment.csv": "73f12bd82146de6c656091a12ac73379eada3a789160b6f4c0e7d0dd3a7c79b9",
+    "site_E_sessions.csv": "4800e1e101d15cda69a32c07b4412862a29082c10eac2cf7bba2727026612c43"
+  },
+  "rebuilt_site_e_sha256": {
+    "site_E_codebook.md": "d8eccc8eeeb31fcca24b27e977468c88d9a34223a793e9f895e0fe6b406873f0",
+    "site_E_enrollment.csv": "73f12bd82146de6c656091a12ac73379eada3a789160b6f4c0e7d0dd3a7c79b9",
+    "site_E_sessions.csv": "4800e1e101d15cda69a32c07b4412862a29082c10eac2cf7bba2727026612c43"
+  },
   "identical": true
 }

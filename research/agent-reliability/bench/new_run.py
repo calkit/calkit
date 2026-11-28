@@ -6,7 +6,7 @@ Creates runs/<arm>__<task>__<stamp>/ with:
   for stale-clone, a fresh clone of templates/stale/<arm> instead
 - venv/: a new Python environment with the pinned packages, at the
   versions the harness's uv.lock gives them (every arm but calkit)
-- incoming/: files the task's prompt names (data-correction only)
+- incoming/: files the task's prompt names (data-correction and add-site)
 - prompt.txt: the arm's preamble and the task's prompt
 - env.sh: source it before starting the agent, from project/; it also
   gives the agent's commits the benchmark's identity, not this machine's
@@ -41,10 +41,11 @@ TASKS = [
     "undo",
     "stale-clone",
     "distant-consumer",
+    "add-site",
 ]
 # Tasks that need the research history, and the Git arms for stale-clone
 HISTORY_TASKS = {"provenance", "regression", "undo", "distant-consumer"}
-GIT_HISTORY_ARMS = ["messy-git", "make", "calkit"]
+GIT_HISTORY_ARMS = ["messy-git", "make", "make-hint", "calkit", "calkit-hint"]
 # A time every file in a fresh clone gets, as if checked out at once
 CLONE_TIME = 1_795_000_000
 
@@ -65,7 +66,7 @@ def clone_stale(arm: str, project: Path) -> None:
     say nothing about what's out of date. DVC-tracked outputs come along,
     as a pull from the project's remote would bring them.
     """
-    src = arms.get_templates_dir() / "stale" / arm
+    src = arms.get_templates_dir() / "stale" / arms.get_template_name(arm)
     subprocess.run(
         ["git", "clone", "-q", str(src), str(project)],
         check=True,
@@ -180,9 +181,11 @@ def create_run(
     if task == "stale-clone":
         clone_stale(arm, project)
     else:
-        arms.copy_project(arms.get_templates_dir() / arm, project)
+        template = arms.get_templates_dir() / arms.get_template_name(arm)
+        arms.copy_project(template, project)
+    base = arms.get_base(arm)
     venv = run / "venv"
-    if arm != "calkit":
+    if base != "calkit":
         create_venv(venv)
     fields_extra = {}
     if task == "regression":
@@ -200,6 +203,8 @@ def create_run(
             ROOT / "incoming/participants_2026-05-20_corrected.csv",
             incoming,
         )
+    if task == "add-site":
+        shutil.copytree(ROOT / "incoming/site-e", incoming)
     calkit = arms.get_calkit_command()
     fields = {
         "project": project,
@@ -208,14 +213,15 @@ def create_run(
         "calkit": calkit,
         **fields_extra,
     }
-    preamble = (ROOT / "preambles" / f"{arm}.txt").read_text().strip()
+    # An intervention arm's agent is told what its base arm's is
+    preamble = (ROOT / "preambles" / f"{base}.txt").read_text().strip()
     prompt = (ROOT / "tasks" / f"{task}.txt").read_text().strip()
     (run / "prompt.txt").write_text(
         preamble.format(**fields) + "\n\n" + prompt.format(**fields) + "\n"
     )
     scratch = run / "agent-state"
     lines = ["unset VIRTUAL_ENV CONDA_PREFIX PYTHONPATH"]
-    if arm != "calkit":
+    if base != "calkit":
         lines.append(f'export PATH="{venv}/bin:$PATH"')
     elif os.path.isfile(shlex.split(calkit)[0]):
         lines.append(
@@ -230,7 +236,7 @@ def create_run(
     adapter = arms.ARMS[arm]
     report_text = (project / adapter["report"]).read_text()
     calkit_version = None
-    if arm == "calkit":
+    if base == "calkit":
         calkit_version = subprocess.run(
             [*shlex.split(calkit), "--version"],
             capture_output=True,
@@ -242,7 +248,8 @@ def create_run(
         "task": task,
         "created": datetime.datetime.now().isoformat(timespec="seconds"),
         "run_dir": str(run),
-        "calkit_command": calkit if arm == "calkit" else None,
+        "calkit_command": calkit if base == "calkit" else None,
+        "intervention": arms.get_intervention(arm),
         "calkit_version": calkit_version,
         "template_git_head": get_git_head(project),
         "template_manifest": arms.get_manifest(project),

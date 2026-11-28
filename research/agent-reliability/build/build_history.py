@@ -14,6 +14,9 @@ that history:
 - make: scripts, a Makefile, and a generated report, committed one change
   per commit with descriptive messages, the submission tagged.
 - calkit: the same as make, but a Calkit pipeline instead of the Makefile.
+- make-hint: make, with the checking guidance
+  (`interventions/check-results.md`) at the end of its README from the
+  start.
 
 The history (`STEPS`):
 
@@ -717,7 +720,10 @@ class History:
                 self.add_calkit_pipeline()
             else:
                 self.copy(HERE / "make/Makefile", "Makefile")
-                self.copy(HIST / "README_make.md", "README.md")
+                readme = (HIST / "README_make.md").read_text()
+                if self.arm == "make-hint":
+                    readme += "\n" + arms.GUIDANCE.read_text()
+                self.write("README.md", readme)
                 self.write("requirements.txt", "\n".join(PACKAGES) + "\n")
                 self.write(".gitignore", "__pycache__/\n.venv/\n")
                 self.commit("Add Makefile to run the analysis")
@@ -983,7 +989,7 @@ class History:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "arm", choices=["messy", "messy-git", "make", "calkit"]
+        "arm", choices=["messy", "messy-git", "make", "make-hint", "calkit"]
     )
     parser.add_argument("dest", type=Path)
     parser.add_argument("--stale", action="store_true")

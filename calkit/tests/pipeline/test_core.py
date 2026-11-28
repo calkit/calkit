@@ -4418,7 +4418,28 @@ def test_get_stage_for_output_reads_map_paths_destinations():
         "environment": "py",
         "outputs": ["."],
     }
+    # An iterated stage produces what its output templates match, after a
+    # stage declaring the path itself
+    stages["fit"] = {
+        "kind": "python-script",
+        "script_path": "fit.py",
+        "environment": "py",
+        "wdir": "results",
+        "outputs": [{"path": "trace/model-{adj}.json"}, "fit-${case}.csv"],
+        "iterate_over": [{"arg_name": "adj", "values": ["a", "b"]}],
+    }
+    stages["fit-b"] = {
+        "kind": "python-script",
+        "script_path": "fit.py",
+        "environment": "py",
+        "outputs": ["results/trace/model-b.json"],
+    }
     for path, stage in [
+        ("results/trace/model-a.json", "fit"),
+        ("results/trace/model-b.json", "fit-b"),
+        ("results/fit-1.csv", "fit"),
+        ("results/model-a.json", None),
+        ("results/trace/model-.json", "trace"),
         ("results/trace", "trace"),
         ("results/trace/run-2/RESULTS.md", "trace"),
         ("results/trace/run-1/RESULTS.md", "runs"),

@@ -66,6 +66,17 @@ jobs:
           sudo apt-get update -q
           sudo apt-get install -yq --no-install-recommends \
             libreoffice-writer libreoffice-math
+      # Pandoc converts the round trip's equations from the source and reads
+      # them back. Ubuntu's is older than 3.8, which lays out aligned
+      # equations unlike newer versions, so a release is pinned instead.
+      - name: Install Pandoc
+        env:
+          PANDOC_VERSION: "3.13"
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/pandoc.deb" \
+            "https://github.com/jgm/pandoc/releases/download/$PANDOC_VERSION/pandoc-$PANDOC_VERSION-1-amd64.deb"
+          sudo apt-get install -yq "$RUNNER_TEMP/pandoc.deb"
+          pandoc --version | head -1
       - name: Run Calkit
         uses: ./actions/run
         env:

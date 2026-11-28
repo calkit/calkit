@@ -731,6 +731,32 @@ def test_build_texlive_env(tmp_dir, texlive_user_home, monkeypatch):
             assert json.load(f) == lock
         out = subprocess.check_output(["calkit", "status"], text=True)
         assert "Pipeline is up to date" in out
+        # Without Pandoc, inline math TeX4ht made Word math of is only
+        # exported, rather than failing to be read back for a later merge
+        from typer.testing import CliRunner
+
+        from calkit.cli.main import app
+
+        with open("paper/main.tex", "w") as f:
+            f.write(
+                "\\documentclass{article}\n\\begin{document}\n"
+                "The speed is $u^2 + v$ here.\n\\end{document}\n"
+            )
+        monkeypatch.setattr(calkit.docx, "find_pandoc", lambda: None)
+        res = CliRunner().invoke(
+            app,
+            [
+                "latex",
+                "to-docx",
+                "--engine",
+                "libreoffice",
+                "--output",
+                "no-pandoc.docx",
+                "paper/main.pdf",
+            ],
+        )
+        assert res.exit_code == 0, res.output
+        assert os.path.isfile("no-pandoc.docx")
 
 
 def test_get_texlive_env(tmp_dir, monkeypatch):

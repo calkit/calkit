@@ -6121,7 +6121,7 @@
     },
     "MystStage": {
       "additionalProperties": false,
-      "description": "A stage that builds a MyST project, the one whose ``myst.yml`` is in\nits ``wdir``, or the project's root without one.\n\nIt builds with ``calkit myst build``, which checks MyST comes from the\nstage's environment, or is a declared requirement, and works out the\nvalues its documents show and where what they show came from first.\nIts documents, their ``myst.yml``, and the files they show or include\nare found when the pipeline compiles, so they're inputs without being\nlisted, and Calkit's MyST plugin is written then too.\n\nOutputs are declared explicitly, e.g., ``_build/site``, since what's\nbuilt depends on the arguments.",
+      "description": "A stage that builds a MyST project, or one document in it.\n\nIts target is the project's folder, i.e., where its ``myst.yml`` is,\nthe ``myst.yml`` itself, or a document in the project, which builds\nonly that document's exports, as ``myst build`` does given a file.\nIt builds with ``calkit doc myst build``, which checks MyST comes from the\nstage's environment, or is a declared requirement, and works out the\nvalues its documents show and where what they show came from first.\nIts documents, their ``myst.yml``, and the files they show or include\nare found when the pipeline compiles, so they're inputs without being\nlisted, and Calkit's MyST plugin is written then too.\n\nOutputs are declared explicitly, e.g., ``_build/site``, since what's\nbuilt depends on the arguments.",
       "properties": {
         "always_run": {
           "default": false,
@@ -6345,6 +6345,11 @@
           "deprecated": true,
           "description": "Deprecated name for 'scheduler'; set 'scheduler' instead."
         },
+        "target_path": {
+          "description": "Path to the MyST project's folder, its myst.yml, or a document in it to build alone.",
+          "title": "Target Path",
+          "type": "string"
+        },
         "wdir": {
           "anyOf": [
             {
@@ -6360,7 +6365,8 @@
         }
       },
       "required": [
-        "environment"
+        "environment",
+        "target_path"
       ],
       "title": "MystStage",
       "type": "object"

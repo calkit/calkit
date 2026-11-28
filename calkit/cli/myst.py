@@ -19,6 +19,13 @@ myst_app = typer.Typer(no_args_is_help=True)
 
 @myst_app.command(name="build")
 def build(
+    target_path: Annotated[
+        str,
+        typer.Argument(
+            help="The MyST project's folder, its myst.yml, or a document in "
+            "it to build alone."
+        ),
+    ],
     myst_args: Annotated[
         list[str] | None,
         typer.Argument(
@@ -33,7 +40,7 @@ def build(
             help=(
                 "Environment to build in, which should provide MyST, or "
                 "`_system` for MyST installed on this machine. Defaults to "
-                "the environment of the folder's myst stage, if any."
+                "the environment of its myst stage, if any."
             ),
         ),
     ] = None,
@@ -55,8 +62,10 @@ def build(
         ),
     ] = False,
 ) -> None:
-    """Build the MyST project in this folder, i.e., where its myst.yml is,
-    in an environment.
+    """Build a MyST project, or one document in it, in an environment.
+
+    It builds from the project's folder, i.e., where its myst.yml is,
+    passing a document to 'myst build' to build only its exports.
 
     The values its documents show with the 'ckvalue' and 'ckrefval' roles,
     and where they and the figures, tables, and files they show with the
@@ -77,21 +86,32 @@ def build(
     from calkit.cli.quarto import _RUN_IN_DIR
     from calkit.markdown import MarkdownParseError, results_by_name
 
-    # The project is wherever calkit.yaml is above here, since a stage
-    # builds from its working directory
+    # The Calkit project is wherever calkit.yaml is above the target, and
+    # the MyST project wherever myst.yml is between them
     wdir = os.getcwd()
-    if not os.path.isfile("myst.yml"):
-        raise_error("There's no myst.yml here; run this where it is")
-    project_dir = wdir
+    target_abs = os.path.abspath(target_path)
+    if not os.path.exists(target_abs):
+        raise_error(f"{target_path} doesn't exist")
+    project_dir = (
+        target_abs
+        if os.path.isdir(target_abs)
+        else os.path.dirname(target_abs)
+    )
     while not os.path.isfile(os.path.join(project_dir, "calkit.yaml")):
         parent = os.path.dirname(project_dir)
         if parent == project_dir:
-            raise_error("This isn't in a Calkit project")
+            raise_error(f"{target_path} isn't in a Calkit project")
         project_dir = parent
     ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
-    myst_dir = Path(os.path.relpath(wdir, project_dir)).as_posix()
-    myst_dir = "" if myst_dir == "." else myst_dir
-    stage = calkit.myst.get_build_stage(myst_dir or ".", ck_info)
+    target_rel = Path(os.path.relpath(target_abs, project_dir)).as_posix()
+    found_dir, document = calkit.myst.get_target_paths(
+        target_rel, wdir=project_dir
+    )
+    if found_dir is None:
+        raise_error(f"There's no myst.yml for {target_path}")
+    myst_dir = found_dir
+    myst_abs = os.path.join(project_dir, myst_dir)
+    stage = calkit.myst.get_build_stage(target_rel, ck_info, wdir=project_dir)
     stage_info = (
         ((ck_info.get("pipeline") or {}).get("stages") or {}).get(stage)
         if stage is not None
@@ -141,14 +161,19 @@ def build(
     # outlive what it was written for
     found = []
     try:
-        for document in calkit.myst.find_documents(myst_dir, wdir=project_dir):
+        documents = (
+            [document]
+            if document is not None
+            else calkit.myst.find_documents(myst_dir, wdir=project_dir)
+        )
+        for document_path in documents:
             text = calkit.quarto.read_document_text(
-                os.path.join(project_dir, document)
+                os.path.join(project_dir, document_path)
             )
             components, roles, included = (
                 calkit.myst.extract_document(
                     text,
-                    document,
+                    document_path,
                     read_text=lambda p: calkit.quarto.read_document_text(
                         os.path.join(project_dir, p)
                     ),
@@ -158,10 +183,10 @@ def build(
                 else ([], [], [])
             )
             if components or roles:
-                found.append((document, components, roles, included))
+                found.append((document_path, components, roles, included))
                 continue
             record_path = os.path.join(
-                project_dir, calkit.quarto.get_provenance_path(document)
+                project_dir, calkit.quarto.get_provenance_path(document_path)
             )
             if os.path.isfile(record_path):
                 os.remove(record_path)
@@ -201,14 +226,14 @@ def build(
             from calkit.references.values import write_values_file
 
             write_values_file(ck_info, wdir=project_dir)
-        for document, components, roles, _ in found:
+        for document_path, components, roles, _ in found:
             values = [v for _, _, v in roles]
             texts = calkit.quarto.check_values(
-                values, document, wdir=project_dir
+                values, document_path, wdir=project_dir
             )
             record_path = calkit.quarto.write_provenance(
                 components,
-                document,
+                document_path,
                 ck_info,
                 wdir=project_dir,
                 document_stage=stage,
@@ -221,17 +246,20 @@ def build(
             calkit.myst.write_plugin(myst_dir, wdir=project_dir)
     except (MarkdownParseError, ValueError) as e:
         raise_error(str(e))
-    cmd = ["myst", "build"] + (myst_args or [])
+    cmd = ["myst", "build"]
+    if document is not None:
+        cmd.append(posixpath.relpath(document, myst_dir))
+    cmd += myst_args or []
     if environment == "_system":
         # Resolved first, so a 'myst.cmd' shim is found on Windows
         cmd[0] = shutil.which("myst") or "myst"
         try:
-            subprocess.check_call(cmd)
+            subprocess.check_call(cmd, cwd=myst_abs)
         except (OSError, subprocess.CalledProcessError) as e:
             raise_error(f"Building failed: {e}")
         return
     # The environment is defined relative to the project, but the build
-    # runs here, which locally Calkit's own interpreter goes back to inside
+    # runs from the MyST project's folder, which locally Calkit's own interpreter goes back to inside
     # the environment, and elsewhere, e.g., in a container, is the working
     # directory relative to the project
     env_kind = (
@@ -239,9 +267,9 @@ def build(
     )
     run_wdir = None
     if env_kind in calkit.environments.APP_CHECK_ENV_KINDS:
-        cmd = [sys.executable, "-c", _RUN_IN_DIR, wdir] + cmd
+        cmd = [sys.executable, "-c", _RUN_IN_DIR, myst_abs] + cmd
     else:
-        run_wdir = myst_dir or None
+        run_wdir = None if myst_dir == "." else myst_dir
     os.chdir(project_dir)
     try:
         run_in_env(cmd, env_name=environment, wdir=run_wdir, no_check=no_check)

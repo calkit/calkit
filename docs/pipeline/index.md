@@ -713,10 +713,12 @@ Model class: `MatlabScriptStage`
 
 Model class: `MystStage`
 
-A stage that builds a MyST project, the one whose `myst.yml` is in
-its `wdir`, or the project's root without one.
+A stage that builds a MyST project, or one document in it.
 
-It builds with `calkit myst build`, which checks MyST comes from the
+Its target is the project's folder, i.e., where its `myst.yml` is,
+the `myst.yml` itself, or a document in the project, which builds
+only that document's exports, as `myst build` does given a file.
+It builds with `calkit doc myst build`, which checks MyST comes from the
 stage's environment, or is a declared requirement, and works out the
 values its documents show and where what they show came from first.
 Its documents, their `myst.yml`, and the files they show or include
@@ -726,9 +728,10 @@ listed, and Calkit's MyST plugin is written then too.
 Outputs are declared explicitly, e.g., `_build/site`, since what's
 built depends on the arguments.
 
-| Kind-specific parameter | Type      | Required | Default | Description                                               |
-| ----------------------- | --------- | -------- | ------- | --------------------------------------------------------- |
-| `args`                  | list[str] | no       |         | Extra arguments passed to 'myst build', e.g., ['--site']. |
+| Kind-specific parameter | Type      | Required | Default | Description                                                                          |
+| ----------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `target_path`           | str       | yes      |         | Path to the MyST project's folder, its myst.yml, or a document in it to build alone. |
+| `args`                  | list[str] | no       |         | Extra arguments passed to 'myst build', e.g., ['--site'].                            |
 
 ### `procedure`
 

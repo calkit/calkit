@@ -19,7 +19,7 @@ def test_build(tmp_path: Path) -> None:
 
     def build(*args: str) -> subprocess.CompletedProcess:
         return subprocess.run(
-            ["calkit", "myst", "build", *args],
+            ["calkit", "doc", "myst", "build", ".", *args],
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -124,7 +124,7 @@ def test_build(tmp_path: Path) -> None:
                 "kind": "command",
                 "wdir": "site",
                 "command": (
-                    "calkit doc myst build -e _system -- "
+                    "calkit doc myst build . -e _system -- "
                     "index.md page2.md --md --ci"
                 ),
                 "environment": "_system",

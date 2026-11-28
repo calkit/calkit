@@ -61,35 +61,35 @@ stages:
       md5: 3bec6190558a3ec3626e2c7d3d41c283
       size: 23951
   paper:
-    cmd: calkit myst build -e py --no-check -- --site --ci
+    cmd: calkit doc myst build -e py --no-check paper -- --site --ci
     deps:
-    - path: ../data/decay.csv
+    - path: data/decay.csv
       hash: md5
       md5: 225310231da9d1ec50a6b429d83f1785
       size: 579
-    - path: ../figures/fit.svg
+    - path: figures/fit.svg
       hash: md5
       md5: 3bec6190558a3ec3626e2c7d3d41c283
       size: 23951
-    - path: ../pixi.lock
-      hash: md5
-      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
-      size: 168010
-    - path: ../results/fit.json
-      hash: md5
-      md5: 5d4d1d64736943844e105dc8524cef90
-      size: 120
-    - path: index.md
+    - path: paper/index.md
       hash: md5
       md5: 72b7845609c20c890750915db30bfbf3
       size: 448
-    - path: myst.yml
+    - path: paper/myst.yml
       hash: md5
       md5: e20b9c58dd5a390e05470d9923f964b6
       size: 235
-    outs:
-    - path: _build/site
+    - path: pixi.lock
       hash: md5
-      md5: 10db663666cc4eb8130d01ace8cae3dc.dir
-      size: 74662
+      md5: d89f6d0b3d3e7ab472fac7908e7a9a60
+      size: 168010
+    - path: results/fit.json
+      hash: md5
+      md5: 5d4d1d64736943844e105dc8524cef90
+      size: 120
+    outs:
+    - path: paper/_build/site
+      hash: md5
+      md5: 8bfaae8a5c0fb2872be0bf57f787f4f3.dir
+      size: 97574
       nfiles: 9

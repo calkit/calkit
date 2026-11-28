@@ -45,7 +45,7 @@ LITERAL_DIRECTIVES = {
 # Turns what Calkit recorded before building into MyST's AST, deciding
 # nothing about what it says, which is decided in Python, the same as for
 # Quarto, and tested there
-PLUGIN_JS = r"""// Written by Calkit; changes are overwritten by 'calkit myst build'.
+PLUGIN_JS = r"""// Written by Calkit; changes are overwritten by 'calkit doc myst build'.
 // Shows a file from the project with {ckfigure}, {cktable} for a CSV or
 // TSV file, or {ckinclude} for anything else, and values with {ckvalue}
 // and {ckrefval}, with where each came from collapsed under it, or for a
@@ -191,7 +191,7 @@ function getUnrecorded() {
       type: "paragraph",
       children: [
         text("Build with "),
-        { type: "inlineCode", value: "calkit myst build" },
+        { type: "inlineCode", value: "calkit doc myst build" },
         text(" or "),
         { type: "inlineCode", value: "calkit run" },
         text("."),
@@ -809,27 +809,73 @@ def get_plugin_problem(myst_dir: str, wdir: str | None = None) -> str | None:
     )
 
 
-def get_build_stage(myst_dir: str, ck_info: dict) -> str | None:
-    """The pipeline stage that builds a MyST project, i.e., a ``myst`` stage
-    whose ``wdir`` is its folder, or else one whose command runs
-    ``calkit doc myst build`` there.
+def get_target_paths(
+    target_path: str, wdir: str | None = None
+) -> tuple[str | None, str | None]:
+    """The folder of the MyST project a target is in, i.e., where its
+    ``myst.yml`` is, and the document it names, if any, both as POSIX
+    paths relative to ``wdir``, like ``target_path``.
+
+    The target is the project's folder, its ``myst.yml``, or a document in
+    it, whose project is the nearest folder above it with a ``myst.yml``,
+    without leaving ``wdir``. The folder is None if there's no
+    ``myst.yml`` there.
     """
+
+    def has_config(folder: str) -> bool:
+        return os.path.isfile(os.path.join(wdir or "", folder, "myst.yml"))
+
+    target = posixpath.normpath(target_path.replace("\\", "/"))
+    if os.path.isdir(os.path.join(wdir or "", target)):
+        return (target if has_config(target) else None), None
+    if posixpath.basename(target) == "myst.yml":
+        folder = posixpath.dirname(target) or "."
+        return (folder if has_config(folder) else None), None
+    folder = posixpath.dirname(target) or "."
+    while not has_config(folder):
+        if folder in (".", "") or folder.startswith(".."):
+            return None, target
+        folder = posixpath.dirname(folder) or "."
+    return folder, target
+
+
+def get_build_stage(
+    target_path: str, ck_info: dict, wdir: str | None = None
+) -> str | None:
+    """The pipeline stage that builds a MyST target, a folder, its
+    ``myst.yml``, or a document, relative to ``wdir``: a ``myst`` stage
+    building the same, or else its whole project, or else a stage whose
+    command runs ``calkit doc myst build`` from the project's folder.
+    """
+    myst_dir, document = get_target_paths(target_path, wdir=wdir)
+    if myst_dir is None:
+        return None
     stages = {
         str(name): stage
         for name, stage in (
             (ck_info.get("pipeline") or {}).get("stages") or {}
         ).items()
         if isinstance(stage, dict)
-        and posixpath.normpath(stage.get("wdir") or ".")
-        == posixpath.normpath(Path(myst_dir).as_posix())
     }
+    builds = {}
     for name, stage in stages.items():
-        if stage.get("kind") == "myst":
-            return name
+        if stage.get("kind") == "myst" and isinstance(
+            stage.get("target_path"), str
+        ):
+            builds[name] = get_target_paths(
+                posixpath.join(stage.get("wdir") or "", stage["target_path"]),
+                wdir=wdir,
+            )
+    for wanted in [(myst_dir, document), (myst_dir, None)]:
+        for name, paths in builds.items():
+            if paths == wanted:
+                return name
     for name, stage in stages.items():
         command = stage.get("command")
-        if isinstance(command, str) and re.search(
-            r"\bcalkit (doc |document )?myst build\b", command
+        if (
+            isinstance(command, str)
+            and re.search(r"\bcalkit (doc|document) myst build\b", command)
+            and posixpath.normpath(stage.get("wdir") or ".") == myst_dir
         ):
             return name
     return None
@@ -920,7 +966,7 @@ def add_role_values(
 
 # Quiets what the plugin shows, for book-theme, which loads it if
 # myst.yml lists it under site.options.style
-PLUGIN_CSS = """/* Written by Calkit; changes are overwritten by 'calkit myst build'. */
+PLUGIN_CSS = """/* Written by Calkit; changes are overwritten by 'calkit doc myst build'. */
 /* Where something came from, collapsed under it as a small, muted line,
    as in Quarto, saying what's wrong in a warning color while collapsed */
 details.ck-provenance {

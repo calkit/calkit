@@ -75,11 +75,27 @@ class _ToolArgsCommand(_PathFirstCommand):
 def _get_tool(path: str) -> str | None:
     """Get the name of the tool a document is written in, if known."""
     if os.path.isdir(path):
-        for fname, tool in _FOLDER_TOOLS.items():
+        for fname, folder_tool in _FOLDER_TOOLS.items():
             if os.path.isfile(os.path.join(path, fname)):
-                return tool
+                return folder_tool
         return None
-    return _SUFFIX_TOOLS.get(Path(path).suffix.lower())
+    # MyST also builds from its config
+    if os.path.basename(path) == "myst.yml":
+        return "MyST"
+    tool = _SUFFIX_TOOLS.get(Path(path).suffix.lower())
+    # Markdown in a MyST project is MyST's, as far up as the Calkit project
+    if tool == "Markdown":
+        folder = os.path.dirname(os.path.abspath(path))
+        while True:
+            if os.path.isfile(os.path.join(folder, "myst.yml")):
+                return "MyST"
+            parent = os.path.dirname(folder)
+            if parent == folder or os.path.isfile(
+                os.path.join(folder, "calkit.yaml")
+            ):
+                return tool
+            folder = parent
+    return tool
 
 
 def _get_options(args: list[str]) -> list[str]:
@@ -196,8 +212,8 @@ def build(
     A .tex file is built with `calkit doc latex build`, a Quarto document or
     notebook with `calkit doc quarto render`, a Word document with
     `calkit office word-to-pdf`, a PowerPoint deck to a PDF beside it
-    with `calkit export pptx`, and a folder with a myst.yml with
-    `calkit doc myst build`.
+    with `calkit export pptx`, and a MyST project, its myst.yml, or a
+    document in it with `calkit doc myst build`.
 
     A document a pipeline stage builds is built as that stage does, i.e.,
     in its environment and with its options, unless options for those are
@@ -215,24 +231,9 @@ def build(
     tool = _get_tool(path)
     if _wants_help(args):
         tool = "Quarto" if tool == "Quarto project" else tool
-        _run(
-            ctx,
-            "build",
-            path,
-            ([] if tool == "MyST" else [path]) + args,
-            tool=tool,
-        )
+        _run(ctx, "build", path, [path] + args, tool=tool)
         return
     _check_exists(path)
-    # A MyST project builds from its folder, where its myst.yml is
-    if tool == "MyST":
-        wdir = os.getcwd()
-        os.chdir(path)
-        try:
-            _run(ctx, "build", ".", args, tool=tool)
-        finally:
-            os.chdir(wdir)
-        return
     # A Quarto project is the documents its stages render
     if tool == "Quarto project":
         from calkit.cli.quarto import render_stage

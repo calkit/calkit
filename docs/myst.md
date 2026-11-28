@@ -5,30 +5,34 @@
 [MyST](https://mystmd.org) builds websites and documents, e.g., a
 notebook publication, from Markdown and notebooks.
 Calkit builds a MyST project with `calkit doc build`,
-given the folder with its `myst.yml`, in one of the project's environments,
+given its folder, i.e., where its `myst.yml` is, or the `myst.yml` itself,
+in one of the project's environments,
 with any arguments for `myst build` after `--`:
 
 ```sh
 calkit doc build site -e _system -- --html
 ```
 
-This runs `calkit doc myst build` in that folder.
+Given a document in the project instead, e.g., `site/index.md`,
+it builds only that document's exports, as `myst build` does given a file.
+Either way it runs `calkit doc myst build` from the project's folder.
 
 <!-- TODO: needs human review -->
 
-In the pipeline, a `myst` stage builds the project in its `wdir`,
-the folder with its `myst.yml`:
+In the pipeline, a `myst` stage builds its `target_path`,
+which, as for `calkit doc build`, is the project's folder, its `myst.yml`,
+or a document in it:
 
 ```yaml
 pipeline:
   stages:
     site:
       kind: myst
-      wdir: site
+      target_path: site
       environment: _system
       args: [--html]
       outputs:
-        - _build/html
+        - site/_build/html
 ```
 
 Its documents, their `myst.yml`, and the files and results files they
@@ -106,8 +110,9 @@ so MyST doesn't read results files itself.
 A `myst` stage depends on everything shown this way,
 including results files, and a notebook's saved values, e.g.,
 `.calkit/notebooks/outputs/fit.ipynb/values.json`.
-A `command` stage running `calkit doc myst build` has to list them as
-`inputs`, and the build fails, naming what to add, when it doesn't.
+A `command` stage running `calkit doc myst build` from the project's
+folder has to list them as `inputs`,
+and the build fails, naming what to add, when it doesn't.
 Directives and roles in a file a document `{include}`s,
 or shows with `ckinclude`, count for the document,
 with an `{include}` inside an included file read relative to that file,

@@ -716,7 +716,8 @@ def test_myststage(tmp_path):
     from calkit.models.pipeline import Pipeline
 
     # A project in a folder, showing a figure another stage makes, a
-    # results value, an included file, and a file it builds itself
+    # results value, an included file, and a file it builds itself, plus a
+    # page showing nothing
     site = tmp_path / "site"
     (site / "_build").mkdir(parents=True)
     (site / "myst.yml").write_text("version: 1\nproject: {}\n")
@@ -726,59 +727,81 @@ def test_myststage(tmp_path):
         "The slope is {ckvalue}`results/fit.json slope .2f`.\n\n"
         "```{include} parts/intro.md\n```\n"
     )
+    (site / "page.md").write_text("A page.\n")
     (site / "parts").mkdir()
     (site / "parts" / "intro.md").write_text("Hi.\n")
     (tmp_path / "results").mkdir()
     (tmp_path / "results" / "fit.json").write_text('{"slope": 1}')
     (tmp_path / "calkit.yaml").write_text("{}\n")
-    pipeline = Pipeline.model_validate(
-        {
-            "stages": {
-                "plot": {
-                    "kind": "python-script",
-                    "environment": "py",
-                    "script_path": "plot.py",
-                    "outputs": ["figures/plot.svg"],
-                },
-                "site": {
-                    "kind": "myst",
-                    "environment": "py",
-                    "wdir": "site",
-                    "args": ["--site", "--ci"],
-                    "outputs": ["_build/site"],
-                },
-            }
-        }
-    )
-    s = pipeline.stages["site"]
-    assert isinstance(s, MystStage)
-    assert s.myst_dir == "site"
-    # Builds in its folder, with what it shows as inputs once compiled,
-    # and the plugin written
-    assert s.dvc_cmd == "calkit myst build -e py --no-check -- --site --ci"
-    pipeline.preprocess_stages(str(tmp_path), write_files=True)
-    deps = s.dvc_deps
-    for dep in [
-        "myst.yml",
-        "index.md",
-        "parts/intro.md",
-        "../figures/plot.svg",
-        "../results/fit.json",
+    plot = {
+        "kind": "python-script",
+        "environment": "py",
+        "script_path": "plot.py",
+        "outputs": ["figures/plot.svg"],
+    }
+    # Its folder, its myst.yml, or with a wdir, a document in it alone
+    for stage, cmd, expected in [
+        (
+            {"target_path": "site", "outputs": ["site/_build/site"]},
+            "calkit doc myst build -e py --no-check site -- --site --ci",
+            [
+                "site/myst.yml",
+                "site/index.md",
+                "site/page.md",
+                "site/parts/intro.md",
+                "figures/plot.svg",
+                "results/fit.json",
+            ],
+        ),
+        (
+            {"target_path": "site/myst.yml"},
+            "calkit doc myst build -e py --no-check site/myst.yml -- --site --ci",
+            ["site/myst.yml", "site/index.md", "site/page.md"],
+        ),
+        (
+            {"wdir": "site", "target_path": "index.md"},
+            "calkit doc myst build -e py --no-check index.md -- --site --ci",
+            ["myst.yml", "index.md", "../figures/plot.svg"],
+        ),
     ]:
-        assert dep in deps, dep
-    assert not any("_build" in d for d in deps)
+        pipeline = Pipeline.model_validate(
+            {
+                "stages": {
+                    "plot": plot,
+                    "site": {
+                        "kind": "myst",
+                        "environment": "py",
+                        "args": ["--site", "--ci"],
+                        **stage,
+                    },
+                }
+            }
+        )
+        s = pipeline.stages["site"]
+        assert isinstance(s, MystStage)
+        assert s.dvc_cmd == cmd
+        # What it shows are inputs once compiled, except what it builds,
+        # and the plugin is written
+        pipeline.preprocess_stages(str(tmp_path), write_files=True)
+        deps = s.dvc_deps
+        for dep in expected:
+            assert dep in deps, (stage, dep)
+        assert not any("_build" in d for d in deps), stage
+        assert ("site/page.md" in deps or "page.md" in deps) == (
+            "index.md" not in stage["target_path"]
+        )
     assert (site / "_extensions" / "calkit" / "myst.mjs").is_file()
-    # At the project's root, without a myst.yml, it finds nothing, and
-    # MyST from this machine is allowed if the stage requires it
+    # Outside a MyST project it finds nothing, and MyST from this machine
+    # is allowed if the stage requires it
     s = MystStage(
         environment="_system",
+        target_path="results",
         requirements=["myst"],
     )
-    assert s.myst_dir == ""
     s.preprocess(str(tmp_path), lambda p: False)
     assert s.dvc_deps == super(MystStage, s).dvc_deps
     assert s.dvc_cmd == (
-        "calkit myst build -e _system --no-check --allow-machine-myst"
+        "calkit doc myst build -e _system --no-check --allow-machine-myst results"
     )
 
 

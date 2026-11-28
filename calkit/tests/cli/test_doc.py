@@ -187,7 +187,7 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
                     "site": {
                         "kind": "myst",
                         "environment": "_system",
-                        "wdir": "site",
+                        "target_path": "site",
                         "args": ["--site"],
                         "requirements": ["myst"],
                     }
@@ -195,13 +195,21 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
             },
         }
     )
+    # Markdown in a MyST project is built alone, or as its project's stage
+    # does, by its myst.yml too
+    Path("site/page.md").write_text("A page.\n")
     os.makedirs("sub")
     monkeypatch.chdir("sub")
-    calls.clear()
-    result = CliRunner().invoke(app, ["doc", "build", "../site", "--", "--ci"])
-    assert result.exit_code == 0, result.output
-    assert calls == [("quarto", ["build", "--site", "--ci"])]
-    assert os.path.samefile(os.getcwd(), tmp_path / "sub")
+    for args, expected in [
+        (["../site", "--", "--ci"], ["build", "--site", "--ci"]),
+        (["../site/myst.yml"], ["build", "--site"]),
+        (["../site/page.md"], ["build", "page.md", "--site"]),
+    ]:
+        calls.clear()
+        result = CliRunner().invoke(app, ["doc", "build", *args])
+        assert result.exit_code == 0, (args, result.output)
+        assert calls == [("quarto", expected)], args
+        assert os.path.samefile(os.getcwd(), tmp_path / "sub")
 
 
 def test_build_as_stage(

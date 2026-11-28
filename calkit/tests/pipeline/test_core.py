@@ -328,7 +328,7 @@ def test_to_dvc_calkit_commands_exist(
             "environment": "py",
             "target_path": "doc.qmd",
         },
-        "myst": {"kind": "myst", "environment": "py", "wdir": "site"},
+        "myst": {"kind": "myst", "environment": "py", "target_path": "site"},
         "map": {
             "kind": "map-paths",
             "paths": [{"kind": "file-to-file", "src": "a.txt", "dest": "b"}],

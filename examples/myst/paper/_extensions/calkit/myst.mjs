@@ -1,4 +1,4 @@
-// Written by Calkit; changes are overwritten by 'calkit myst build'.
+// Written by Calkit; changes are overwritten by 'calkit doc myst build'.
 // Shows a file from the project with {ckfigure}, {cktable} for a CSV or
 // TSV file, or {ckinclude} for anything else, and values with {ckvalue}
 // and {ckrefval}, with where each came from collapsed under it, or for a
@@ -144,7 +144,7 @@ function getUnrecorded() {
       type: "paragraph",
       children: [
         text("Build with "),
-        { type: "inlineCode", value: "calkit myst build" },
+        { type: "inlineCode", value: "calkit doc myst build" },
         text(" or "),
         { type: "inlineCode", value: "calkit run" },
         text("."),

@@ -2159,10 +2159,12 @@ class QuartoStage(Stage):
 
 
 class MystStage(Stage):
-    """A stage that builds a MyST project, the one whose ``myst.yml`` is in
-    its ``wdir``, or the project's root without one.
+    """A stage that builds a MyST project, or one document in it.
 
-    It builds with ``calkit myst build``, which checks MyST comes from the
+    Its target is the project's folder, i.e., where its ``myst.yml`` is,
+    the ``myst.yml`` itself, or a document in the project, which builds
+    only that document's exports, as ``myst build`` does given a file.
+    It builds with ``calkit doc myst build``, which checks MyST comes from the
     stage's environment, or is a declared requirement, and works out the
     values its documents show and where what they show came from first.
     Its documents, their ``myst.yml``, and the files they show or include
@@ -2174,6 +2176,10 @@ class MystStage(Stage):
     """
 
     kind: Literal["myst"] = "myst"
+    target_path: str = Field(
+        description="Path to the MyST project's folder, its myst.yml, or a "
+        "document in it to build alone."
+    )
     args: list[str] = Field(
         default=[],
         description="Extra arguments passed to 'myst build', e.g., "
@@ -2185,16 +2191,16 @@ class MystStage(Stage):
     _document_paths: list[str] = PrivateAttr(default_factory=list)
 
     @property
-    def myst_dir(self) -> str:
-        """The folder with the project's ``myst.yml``, relative to the
-        project, or ``""`` for its root."""
-        path = posixpath.normpath(self.wdir or ".")
-        return "" if path == "." else path
+    def project_target_path(self) -> str:
+        """The target's path relative to the project."""
+        return posixpath.normpath(
+            posixpath.join(self.wdir or "", self.target_path)
+        )
 
     @property
     def allows_machine_myst(self) -> bool:
         """Whether MyST from this machine is expected, as it is if the stage
-        requires it, or the project does, which ``calkit myst build`` reads
+        requires it, or the project does, which ``calkit doc myst build`` reads
         itself.
         """
         import calkit.environments
@@ -2218,7 +2224,7 @@ class MystStage(Stage):
         include, since they're as much inputs as its ``myst.yml``, and with
         ``write_files``, write Calkit's MyST plugin that shows them.
 
-        A malformed directive or role is left for ``calkit myst build`` to
+        A malformed directive or role is left for ``calkit doc myst build`` to
         report when the stage runs, rather than stopping the pipeline from
         compiling.
         """
@@ -2236,9 +2242,12 @@ class MystStage(Stage):
             )
 
         self._document_paths = []
-        config_path = posixpath.join(self.myst_dir, "myst.yml")
-        if not exists(config_path):
+        myst_dir, document = calkit.myst.get_target_paths(
+            self.project_target_path, wdir=project_dir
+        )
+        if myst_dir is None:
             return
+        config_path = posixpath.normpath(posixpath.join(myst_dir, "myst.yml"))
         # Except what it makes itself, e.g., its build folder
         own_paths = [
             posixpath.normpath(posixpath.join(self.wdir or "", p))
@@ -2247,8 +2256,10 @@ class MystStage(Stage):
         paths = [config_path]
         shows = False
         try:
-            documents = calkit.myst.find_documents(
-                self.myst_dir, wdir=project_dir
+            documents = (
+                [document]
+                if document is not None
+                else calkit.myst.find_documents(myst_dir, wdir=project_dir)
             )
             results = None
             for document in documents:
@@ -2279,12 +2290,12 @@ class MystStage(Stage):
             and (exists(p) or exists(p + ".dvc") or is_output(p))
         ]
         if write_files and shows:
-            calkit.myst.write_plugin(self.myst_dir, wdir=project_dir)
+            calkit.myst.write_plugin(myst_dir, wdir=project_dir)
 
     @property
     def dvc_cmd(self) -> str:
         # Dispatched to a job scheduler or another machine as other stages
-        # are, with 'calkit myst build' taking the place of the inner xenv;
+        # are, with 'calkit doc myst build' taking the place of the inner xenv;
         # with no runtime to activate there, it builds as is
         inner_xenv = f"calkit xenv -n {self.inner_environment} --no-check --"
         prefix = self.xenv_cmd
@@ -2298,10 +2309,11 @@ class MystStage(Stage):
         args = ["-e", environment, "--no-check"]
         if self.allows_machine_myst:
             args.append("--allow-machine-myst")
+        args.append(self.target_path)
         if self.args:
             args += ["--"] + self.args
         # Quoted for cmd.exe too, which DVC runs commands with on Windows
-        cmd = "calkit myst build " + " ".join(quote_arg(a) for a in args)
+        cmd = "calkit doc myst build " + " ".join(quote_arg(a) for a in args)
         return f"{prefix} {cmd}".strip()
 
     @property

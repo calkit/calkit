@@ -42,8 +42,8 @@ pipeline:
           storage: git
     paper:
       kind: myst
-      wdir: paper
+      target_path: paper
       environment: py
       args: [--site, --ci]
       outputs:
-        - _build/site
+        - paper/_build/site

@@ -14,6 +14,7 @@ import git
 import pytest
 
 import calkit
+import calkit.conda
 import calkit.environments
 
 
@@ -424,6 +425,108 @@ def test_check_reqs(tmp_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     result = CliRunner().invoke(calkit_app, ["check", "reqs", "--stale"])
     assert result.exit_code != 0
     assert "the project: env-var 'CK_PROJECT' not found" in result.output
+    # The app an environment is built with is required, except for one only
+    # used on another machine, and a declared one is checked instead
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
+    monkeypatch.setattr(calkit.conda, "find_mamba_exe", lambda: None)
+    for name in ("py", "far-py"):
+        ck_info["environments"][name] = {
+            "kind": "conda",
+            "path": "environment.yml",
+        }
+    ck_info["pipeline"]["stages"]["b"]["environment"] = "py"
+    ck_info["pipeline"]["stages"]["remote"]["environment"] = "far:far-py"
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    for name, value in every.items():
+        monkeypatch.setenv(name, value)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert "App 'conda' is not installed" in result.output
+    assert "An installer is available" in result.output
+    assert (
+        "environment 'py': app 'conda' not found on this machine"
+    ) in result.output
+    assert "far-py" not in result.output
+    ck_info["pipeline"]["stages"]["b"]["requirements"].append("conda>=1")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert "stage 'b': app 'conda' not found" in result.output
+    assert "environment 'py'" not in result.output
+    assert result.output.count("App 'conda' is not installed") == 1
+    # One declared for another machine isn't checked here, so doesn't count
+    ck_info["pipeline"]["stages"]["b"]["requirements"].remove("conda>=1")
+    ck_info["environments"]["far"]["requirements"].append("conda")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert (
+        "environment 'py': app 'conda' not found on this machine"
+    ) in result.output
+    # Nor does one declared for another stage, as for 'calkit run', or Mamba,
+    # which doesn't provide Conda
+    ck_info["environments"]["far"]["requirements"].remove("conda")
+    ck_info["pipeline"]["stages"]["c"] = {
+        "kind": "shell-command",
+        "command": "echo c > c.txt",
+        "environment": "py",
+        "requirements": ["conda>=1"],
+        "outputs": [{"path": "c.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert "stage 'c': app 'conda' not found" in result.output
+    assert "environment 'py': app 'conda' not found" in result.output
+    ck_info["requirements"].append("mamba")
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert "the project: app 'mamba' not found" in result.output
+    assert "environment 'py': app 'conda' not found" in result.output
+    # A script's own environment needs uv
+    ck_info["requirements"].remove("mamba")
+    del ck_info["pipeline"]["stages"]["c"]
+    ck_info["environments"]["py"]["kind"] = "uv-venv"
+    ck_info["environments"]["py"]["path"] = "requirements.txt"
+    ck_info["pipeline"]["stages"]["script"] = {
+        "kind": "python-script",
+        "script_path": "script.py",
+        "outputs": [{"path": "out.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    check_dep_exists = calkit.core.check_dep_exists
+    monkeypatch.setattr(
+        calkit.core,
+        "check_dep_exists",
+        lambda name, *args, **kwargs: (
+            name != "uv" and check_dep_exists(name, *args, **kwargs)
+        ),
+    )
+    result = CliRunner().invoke(calkit_app, ["check", "reqs"])
+    assert result.exit_code != 0
+    assert "environment 'py': app 'uv' not found" in result.output
+    assert "environment 'script.py': app 'uv' not found" in result.output
+    # What's missing is said once with --stale too, though finding what's
+    # out of date checks it
+    monkeypatch.setattr(
+        calkit.pipeline, "get_status", calkit.pipeline.core.get_status
+    )
+    with open("script.py", "w") as f:
+        f.write("# /// script\n# requires-python = '>=3.10'\n# ///\n")
+    del ck_info["subprojects"]
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    result = CliRunner().invoke(calkit_app, ["check", "reqs", "--stale"])
+    assert result.exit_code != 0
+    assert "environment 'script.py': app 'uv' not found" in result.output
+    assert result.output.count("App 'uv' is not installed") == 1
 
 
 @pytest.mark.skipif(

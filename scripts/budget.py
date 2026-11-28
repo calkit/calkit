@@ -1,3 +1,7 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = []
+# ///
 """Total up the budget for the 2027 workshop tour.
 
 The line items are data in docs/one-pager/2027-budget.csv, so the total and

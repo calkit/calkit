@@ -8,6 +8,7 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import git
@@ -139,7 +140,8 @@ def test_to_dvc():
     )
     assert env_lock in stage["deps"]
     # TODO: Test other stage types
-    # Test when user forgets to add an environment
+    # With no environment, the script's own is used, which it's checked to
+    # declare once it's there
     ck_info = {
         "environments": envs,
         "pipeline": {
@@ -154,8 +156,11 @@ def test_to_dvc():
             }
         },
     }
-    with pytest.raises(ValueError):
-        calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    stage = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)["get-data"]
+    assert stage["cmd"] == (
+        "uv run --locked --script something/my-cool-script.py"
+    )
+    assert "something/my-cool-script.py.lock" in stage["deps"]
     # Test that we can define inputs from stage outputs
     ck_info = {
         "environments": envs,
@@ -263,6 +268,148 @@ def test_to_dvc():
     assert dvc_stages["plot"]["cmd"].endswith(
         "plot.py --theta ${item.theta} --output C:\\tmp\\ --title ${item.title}"
     )
+
+
+def test_to_dvc_calkit_commands_exist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import inspect
+    import re
+    import shlex
+    from typing import Any
+
+    import typer
+    import typer.main
+    from typer.core import TyperGroup
+
+    import calkit.models.pipeline as models
+    from calkit.cli.main.core import app
+
+    monkeypatch.chdir(tmp_path)
+    subprocess.check_call(["git", "init", "-q"])
+    os.makedirs("paper")
+    nb = {"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 5}
+    for path, text in {
+        "paper/main.tex": "\\documentclass{article}\n",
+        "doc.qmd": "---\ntitle: x\n---\n",
+        "nb.ipynb": json.dumps(nb),
+        "app.py": "import marimo\n",
+        "notes.md": "# Notes\n",
+        "script.py": "",
+        "requirements.txt": "",
+        "vals.json": "{}",
+        "a.txt": "",
+        "fig.svg": "<svg/>",
+        "img.xcf": "",
+        "deck.pptx": "",
+        "letter.docx": "",
+    }.items():
+        Path(path).write_text(text)
+    stages = {
+        "py": {
+            "kind": "python-script",
+            "environment": "py",
+            "script_path": "script.py",
+        },
+        "latex": {
+            "kind": "latex",
+            "environment": "tex",
+            "target_path": "paper/main.tex",
+            "diffs": ["main"],
+        },
+        "quarto": {
+            "kind": "quarto",
+            "environment": "py",
+            "target_path": "doc.qmd",
+        },
+        "map": {
+            "kind": "map-paths",
+            "paths": [{"kind": "file-to-file", "src": "a.txt", "dest": "b"}],
+        },
+        "j2l": {
+            "kind": "json-to-latex",
+            "inputs": ["vals.json"],
+            "outputs": ["vals.tex"],
+        },
+        "q2l": {"kind": "questions-to-latex", "outputs": ["questions.tex"]},
+        "refs": {"kind": "references-check", "target_path": "paper/main.tex"},
+        "nb": {
+            "kind": "jupyter-notebook",
+            "environment": "py",
+            "notebook_path": "nb.ipynb",
+        },
+        "word": {"kind": "word-to-pdf", "word_doc_path": "letter.docx"},
+        "manual": {"kind": "manual-step", "message": "Do it"},
+        "inkscape": {
+            "kind": "inkscape-export",
+            "source_path": "fig.svg",
+            "outputs": ["fig.pdf"],
+        },
+        "gimp": {
+            "kind": "gimp-export",
+            "source_path": "img.xcf",
+            "outputs": ["img.png"],
+        },
+        "pptx": {
+            "kind": "pptx-export",
+            "source_path": "deck.pptx",
+            "outputs": ["deck.pdf"],
+        },
+        "marimo": {
+            "kind": "marimo-html-wasm",
+            "environment": "py",
+            "notebook_path": "app.py",
+            "output_dir": "site",
+        },
+        "proc": {"kind": "procedure", "procedure_name": "prep"},
+        "mdpdf": {
+            "kind": "markdown-pdf",
+            "environment": "tex",
+            "target_path": "notes.md",
+            "pdf_path": "notes.pdf",
+        },
+    }
+    ck_info = {
+        "environments": {
+            "tex": {"kind": "texlive"},
+            "py": {"kind": "uv-venv", "path": "requirements.txt"},
+        },
+        "procedures": {"prep": {"title": "Prep", "steps": [{"summary": "x"}]}},
+        "pipeline": {"stages": stages},
+    }
+    calkit.save_calkit_info(ck_info)
+    # Every stage kind compiling to a Calkit command is covered here, so a
+    # new one is too
+    kinds = set()
+    for cls in vars(models).values():
+        if not (inspect.isclass(cls) and issubclass(cls, models.Stage)):
+            continue
+        kind = cls.model_fields["kind"].default
+        if isinstance(kind, str) and re.search(
+            r'"calkit [a-z]', inspect.getsource(cls)
+        ):
+            kinds.add(kind)
+    assert kinds <= {s["kind"] for s in stages.values()}
+    # Each Calkit command in the compiled pipeline still exists, even if
+    # hidden, since renaming one would rerun users' stages
+    cli = typer.main.get_command(app)
+    dvc_stages = calkit.pipeline.to_dvc(ck_info=ck_info, write=False)
+    n_checked = 0
+    for name, stage in dvc_stages.items():
+        for part in stage["cmd"].split(" -- "):
+            words = shlex.split(part)
+            if words[:1] != ["calkit"]:
+                continue
+            command: Any = cli
+            for word in words[1:]:
+                if not isinstance(command, TyperGroup) or word[0] == "-":
+                    break
+                sub = command.get_command(typer.Context(command), word)
+                assert sub is not None, (name, stage["cmd"])
+                command = sub
+            assert not isinstance(command, TyperGroup), (name, stage["cmd"])
+            n_checked += 1
+    assert n_checked > len(stages)
 
 
 def test_to_dvc_from_matrix_outs():
@@ -4418,7 +4565,28 @@ def test_get_stage_for_output_reads_map_paths_destinations():
         "environment": "py",
         "outputs": ["."],
     }
+    # An iterated stage produces what its output templates match, after a
+    # stage declaring the path itself
+    stages["fit"] = {
+        "kind": "python-script",
+        "script_path": "fit.py",
+        "environment": "py",
+        "wdir": "results",
+        "outputs": [{"path": "trace/model-{adj}.json"}, "fit-${case}.csv"],
+        "iterate_over": [{"arg_name": "adj", "values": ["a", "b"]}],
+    }
+    stages["fit-b"] = {
+        "kind": "python-script",
+        "script_path": "fit.py",
+        "environment": "py",
+        "outputs": ["results/trace/model-b.json"],
+    }
     for path, stage in [
+        ("results/trace/model-a.json", "fit"),
+        ("results/trace/model-b.json", "fit-b"),
+        ("results/fit-1.csv", "fit"),
+        ("results/model-a.json", None),
+        ("results/trace/model-.json", "trace"),
         ("results/trace", "trace"),
         ("results/trace/run-2/RESULTS.md", "trace"),
         ("results/trace/run-1/RESULTS.md", "runs"),
@@ -5258,6 +5426,191 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
             ck_info, stage_names=[item], interactive=False
         )
         assert set(gated) == expected
+    # A script's own environment failing to lock gates only stages running it
+    for name, wdir in [("inline", None), ("inline-wdir", "sub")]:
+        stages[name] = {"kind": "python-script", "script_path": "plot.py"}
+        if wdir is not None:
+            stages[name]["wdir"] = wdir
+    stages["inline-other"] = {
+        "kind": "python-script",
+        "script_path": "other.py",
+        "environment": None,
+    }
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=["inline", "inline-wdir", "inline-other"],
+        interactive=False,
+        failed_environments={os.path.join("sub", "plot.py"): "failed"},
+    )
+    assert gated == {"inline-wdir": "failed"}
+
+
+def test_get_gated_stages_for_apps_environments_are_built_with(
+    tmp_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import calkit.conda
+    import calkit.core
+
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
+    monkeypatch.setattr(calkit.conda, "find_mamba_exe", lambda: None)
+    # Each of these is here unless hidden, whatever this machine has
+    hidden = {"pixi", "julia", "juliaup"}
+    check_dep_exists = calkit.core.check_dep_exists
+
+    def fake_check_dep_exists(name: str, *args: Any, **kwargs: Any) -> bool:
+        if name in ("pixi", "julia", "juliaup", "uv"):
+            return name not in hidden
+        return check_dep_exists(name, *args, **kwargs)
+
+    monkeypatch.setattr(calkit.core, "check_dep_exists", fake_check_dep_exists)
+    monkeypatch.delenv("CK_TEST_TOKEN", raising=False)
+    token = {"kind": "env-var", "name": "CK_TEST_TOKEN"}
+
+    def make_stage(env: str, **kwargs: object) -> dict:
+        return (
+            {"kind": "shell-command", "command": "true"}
+            | {"environment": env}
+            | kwargs
+        )
+
+    ck_info: dict = {
+        "environments": {
+            "py": {"kind": "conda", "path": "environment.yml"},
+            "uv-env": {"kind": "uv-venv", "path": "requirements.txt"},
+            "px": {"kind": "pixi", "path": "pixi.toml"},
+            "jl": {"kind": "julia", "path": "Project.toml", "julia": "1.11"},
+            "pinned": {"kind": "system", "lock": ["hostname"]},
+            "far": {"kind": "system", "host": "calkit-test.invalid"},
+        },
+        "pipeline": {
+            "stages": {
+                "py-stage": make_stage("py", outputs=["py.txt"]),
+                "after": make_stage(
+                    "_system", inputs=[{"from_stage_outputs": "py-stage"}]
+                ),
+                "uv-stage": make_stage("uv-env"),
+                "pixi-stage": make_stage("px"),
+                "julia-stage": make_stage("jl"),
+                # Declared by the name of the same installer
+                "juliaup-stage": make_stage("jl", requirements=["juliaup"]),
+                "token-stage": make_stage("py", requirements=[token]),
+                "pinned-py": make_stage("pinned:py"),
+                "far-py": make_stage("far:py"),
+                # Run here in its inner env, though its outer is far
+                "far-nb": make_stage(
+                    "far:py", kind="jupyter-notebook", notebook_path="n.ipynb"
+                ),
+            }
+        },
+    }
+    lock_fpath = calkit.environments.get_env_lock_fpath(
+        env=ck_info["environments"]["pinned"], env_name="pinned"
+    )
+    assert lock_fpath is not None
+    os.makedirs(os.path.dirname(lock_fpath), exist_ok=True)
+    with open(lock_fpath, "w") as f:
+        json.dump({"hostname": "calkit-test.invalid"}, f)
+    by_requirements: dict[str, list] = {}
+    blocked_by: dict[str, set[str]] = {}
+    checked: dict[str, str | None] = {}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        interactive=False,
+        system_info={},
+        requirements_by_stage=by_requirements,
+        blocked_by=blocked_by,
+        checked=checked,
+    )
+    assert "App 'conda' is not installed" in capsys.readouterr().err
+    # Lacking the app an environment is built with is something wrong, not
+    # the project saying the stage can't run here, but it's offered the same
+    assert set(errors) == {
+        "py-stage",
+        "after",
+        "pixi-stage",
+        "julia-stage",
+        "far-nb",
+    }
+    hint = calkit.pipeline.REQUIREMENTS_FIX_HINT
+    assert errors["py-stage"] == (
+        f"environment 'py' is built with conda, which isn't installed; {hint}"
+    )
+    assert errors["pixi-stage"].startswith(
+        "environment 'px' is built with pixi, which isn't installed"
+    )
+    assert errors["julia-stage"].startswith(
+        "environment 'jl' is built with julia, which isn't installed"
+    )
+    assert blocked_by == {"after": {"py-stage"}}
+    # One the project says can't run here is still skipped for that, and
+    # offered the app too, but not one locked to another machine, nor is
+    # one on another machine held up by this one
+    assert set(gated) == {"token-stage", "juliaup-stage", "pinned-py"}
+    assert "CK_TEST_TOKEN" in gated["token-stage"]
+    assert "juliaup" in gated["juliaup-stage"]
+    assert "locked to another machine" in gated["pinned-py"]
+    assert by_requirements == {
+        "py-stage": ["conda"],
+        "pixi-stage": ["pixi"],
+        "julia-stage": ["julia"],
+        "juliaup-stage": ["juliaup"],
+        "token-stage": [token, "conda"],
+        "far-nb": ["conda"],
+    }
+    # Checking again with what was checked, e.g., to retry reaching a
+    # machine, doesn't check or print it again
+    again = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=set(errors),
+        interactive=False,
+        system_info={},
+        checked=checked,
+    )
+    assert again == ({}, errors)
+    assert capsys.readouterr().err == ""
+    # One declared where the stage runs is checked instead, as declared, but
+    # not one declared for another stage or another machine
+    conda = {"name": "conda", "version_spec": ">=1"}
+    ck_info["pipeline"]["stages"]["token-stage"]["requirements"] = [conda]
+    ck_info["environments"]["far"]["requirements"] = ["conda"]
+    by_requirements = {}
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info,
+        stage_names=["py-stage", "token-stage"],
+        interactive=False,
+        system_info={},
+        requirements_by_stage=by_requirements,
+    )
+    assert set(gated) == {"token-stage"} and set(errors) == {"py-stage"}
+    assert by_requirements == {"token-stage": [conda], "py-stage": ["conda"]}
+    del ck_info["environments"]["far"]["requirements"]
+    # A script's own environment needs uv
+    with open("script.py", "w") as f:
+        f.write("# /// script\n# requires-python = '>=3.10'\n# ///\n")
+    ck_info["pipeline"]["stages"]["script"] = {
+        "kind": "python-script",
+        "script_path": "script.py",
+    }
+    hidden.add("uv")
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["script"], interactive=False, system_info={}
+    )
+    assert gated == {} and errors == {
+        "script": (
+            "environment 'script.py' is built with uv, which isn't "
+            f"installed; {hint}"
+        )
+    }
+    # Once they're here, nothing's skipped for them
+    hidden.clear()
+    monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: sys.executable)
+    del ck_info["pipeline"]["stages"]["token-stage"]
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, interactive=False, system_info={}
+    )
+    assert set(gated) == {"pinned-py"} and errors == {}
 
 
 def test_shell_command_runs_from_a_file_when_the_shell_would_expand_it(
@@ -6006,3 +6359,76 @@ def test_get_summary(tmp_path):
     assert status["make-a"]["status"] == "stale"
     assert status["make-a"]["modified_command"]
     assert status["make-b"]["status"] == "up-to-date"
+
+
+def test_find_document_stages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from calkit.pipeline import find_document_stages
+
+    monkeypatch.chdir(tmp_path)
+    calkit.save_calkit_info(
+        {
+            "pipeline": {
+                "stages": {
+                    "paper": {
+                        "kind": "latex",
+                        "environment": "tex",
+                        "target_path": "paper/main.tex",
+                        "output_dir": "build",
+                    },
+                    "thesis": {
+                        "kind": "latex",
+                        "environment": "tex",
+                        "wdir": "thesis",
+                        "target_path": "main.tex",
+                    },
+                    "pub": {
+                        "kind": "quarto",
+                        "environment": "py",
+                        "target_path": "site/index.qmd",
+                    },
+                    "nb": {
+                        "kind": "jupyter-notebook",
+                        "environment": "py",
+                        "notebook_path": "nb.ipynb",
+                    },
+                    "plot": {
+                        "kind": "python-script",
+                        "environment": "py",
+                        "script_path": "plot.py",
+                    },
+                }
+            }
+        }
+    )
+    for d in ["paper", "thesis", "site", "build", "elsewhere"]:
+        os.makedirs(d)
+    # A document or a latex stage's PDF, from anywhere in the project,
+    # under the stage's wdir
+    for cwd, path, kinds, inside, expected in [
+        (".", "paper/main.tex", None, False, ["paper"]),
+        ("paper", "main.tex", None, False, ["paper"]),
+        ("paper", "../build/main.pdf", None, False, ["paper"]),
+        (".", "thesis/main.tex", None, False, ["thesis"]),
+        ("thesis", "main.pdf", None, False, ["thesis"]),
+        (".", "main.tex", None, False, []),
+        (".", "nb.ipynb", None, False, ["nb"]),
+        (".", "nb.ipynb", ["quarto"], False, []),
+        ("site", ".", ["quarto"], True, ["pub"]),
+        (".", "build", ["latex"], True, []),
+        (".", ".", ["quarto", "latex"], True, ["paper", "thesis", "pub"]),
+        (".", "plot.py", None, False, []),
+    ]:
+        monkeypatch.chdir(os.path.join(tmp_path, cwd))
+        project_dir, ck_info, found = find_document_stages(
+            path, **({"kinds": kinds} if kinds else {}), inside=inside
+        )
+        assert project_dir is not None
+        assert os.path.samefile(project_dir, tmp_path), (cwd, path)
+        assert "pipeline" in ck_info
+        assert [name for name, _ in found] == expected, (cwd, path)
+    # Outside a project there's none
+    monkeypatch.chdir(tmp_path)
+    os.remove("calkit.yaml")
+    assert find_document_stages("paper/main.tex") == (None, {}, [])

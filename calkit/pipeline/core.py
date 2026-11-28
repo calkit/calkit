@@ -5,7 +5,7 @@ import os
 import posixpath
 import re
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Collection, Iterable
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,7 @@ from calkit.models.pipeline import (
     Pipeline,
     ShellCommandStage,
     Stage,
+    compile_output_template,
     is_flag_and_value,
 )
 
@@ -100,6 +101,72 @@ def get_frozen_changes(wdir: str | None = None) -> dict[str, list[str] | None]:
     return changes
 
 
+def get_downstream_stage_names(
+    stage_names: set[str], wdir: str | None = None
+) -> set[str]:
+    """Base names of stages, plus every stage downstream of them.
+
+    DVC only calls a stage out of date when its own inputs changed, so one
+    reading the outputs of an out-of-date stage looks current until that
+    stage reruns, though running the pipeline would rebuild it too.
+
+    Read from ``dvc.lock`` where there is one, since its deps and outs are
+    concrete, falling back to ``dvc.yaml``.
+    """
+    names = set(stage_names)
+    stages: dict = {}
+    for fname in ("dvc.lock", "dvc.yaml"):
+        fpath = os.path.join(wdir or ".", fname)
+        if os.path.isfile(fpath):
+            try:
+                with open(fpath, encoding="utf-8") as f:
+                    stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
+            except Exception:
+                stages = {}
+            if stages:
+                break
+    if not stages:
+        return names
+
+    def _paths(stage: object, key: str) -> list[str]:
+        if not isinstance(stage, dict):
+            return []
+        out = []
+        for item in stage.get(key) or []:
+            path = item.get("path") if isinstance(item, dict) else item
+            if isinstance(path, str):
+                out.append(path.rstrip("/"))
+        return out
+
+    producers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        for path in _paths(stage, "outs"):
+            producers.setdefault(path, set()).add(name.split("@")[0])
+    # A dep matches an out either way around the directory: a stage writing
+    # ``figures`` feeds one reading ``figures/x.png``, and one writing
+    # ``figures/x.png`` feeds one reading the whole ``figures`` directory.
+    consumers: dict[str, set[str]] = {}
+    for name, stage in stages.items():
+        base = name.split("@")[0]
+        for dep in _paths(stage, "deps"):
+            for out, producer_names in producers.items():
+                if (
+                    out == dep
+                    or dep.startswith(out + "/")
+                    or out.startswith(dep + "/")
+                ):
+                    for producer in producer_names:
+                        if producer != base:
+                            consumers.setdefault(producer, set()).add(base)
+    queue = list(names)
+    while queue:
+        for consumer in consumers.get(queue.pop(), set()):
+            if consumer not in names:
+                names.add(consumer)
+                queue.append(consumer)
+    return names
+
+
 def frozen_tainted_stage_names(
     ck_info: dict | None = None,
     wdir: str | None = None,
@@ -139,57 +206,7 @@ def frozen_tainted_stage_names(
         tainted -= current - changed
     except Exception:
         pass
-    stages: dict = {}
-    for fname in ("dvc.lock", "dvc.yaml"):
-        fpath = os.path.join(wdir or ".", fname)
-        if os.path.isfile(fpath):
-            try:
-                with open(fpath, encoding="utf-8") as f:
-                    stages = (calkit.ryaml.load(f) or {}).get("stages") or {}
-            except Exception:
-                stages = {}
-            if stages:
-                break
-    if not stages:
-        return tainted
-
-    def _paths(stage: object, key: str) -> list[str]:
-        if not isinstance(stage, dict):
-            return []
-        out = []
-        for item in stage.get(key) or []:
-            path = item.get("path") if isinstance(item, dict) else item
-            if isinstance(path, str):
-                out.append(path.rstrip("/"))
-        return out
-
-    producers: dict[str, set[str]] = {}
-    for name, stage in stages.items():
-        for path in _paths(stage, "outs"):
-            producers.setdefault(path, set()).add(name.split("@")[0])
-    # A dep matches an out either way around the directory: a stage writing
-    # ``figures`` feeds one reading ``figures/x.png``, and one writing
-    # ``figures/x.png`` feeds one reading the whole ``figures`` directory.
-    consumers: dict[str, set[str]] = {}
-    for name, stage in stages.items():
-        base = name.split("@")[0]
-        for dep in _paths(stage, "deps"):
-            for out, names in producers.items():
-                if (
-                    out == dep
-                    or dep.startswith(out + "/")
-                    or out.startswith(dep + "/")
-                ):
-                    for producer in names:
-                        if producer != base:
-                            consumers.setdefault(producer, set()).add(base)
-    queue = list(tainted)
-    while queue:
-        for consumer in consumers.get(queue.pop(), set()):
-            if consumer not in tainted:
-                tainted.add(consumer)
-                queue.append(consumer)
-    return tainted
+    return get_downstream_stage_names(tainted, wdir=wdir)
 
 
 class PipelineStatus(BaseModel):
@@ -715,11 +732,14 @@ def get_stage_items(
 
     That's the stage alone, keyed by its name, unless it iterates and its
     ``environment`` or ``requirements`` use its values, e.g.,
-    ``environment: "{env}"`` or ``- "{engine}"``. Then it's each item, keyed
-    by the name DVC runs it under, e.g., ``stage@word``, with those values
-    filled in.
+    ``environment: "{env}"`` or ``- "{engine}"``, or its script does, when
+    it runs in the environment the script declares. Then it's each item,
+    keyed by the name DVC runs it under, e.g., ``stage@word``, with those
+    values filled in.
     """
     import json
+
+    import calkit.environments.inline
 
     def check_quoted(obj: Any, field: str) -> None:
         # YAML reads an unquoted {var} as a mapping, {var: null}, which
@@ -750,9 +770,12 @@ def get_stage_items(
         arg_names |= set(
             arg_name if isinstance(arg_name, list) else [arg_name]
         )
+    field_names = ["environment", "requirements"]
+    if calkit.environments.inline.get_stage_script_path(stage) is not None:
+        field_names.append("script_path")
     fields = {
         field: stage[field]
-        for field in ("environment", "requirements")
+        for field in field_names
         if stage.get(field) is not None
     }
     for field, value in fields.items():
@@ -1066,6 +1089,7 @@ def get_gated_stages(
     requirements_by_stage: dict[str, list] | None = None,
     blocked_by: dict[str, set[str]] | None = None,
     failed_environments: dict[str, str] | None = None,
+    checked: dict[str, str | None] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Stages that can't run on this machine, with the reason for each.
 
@@ -1073,8 +1097,10 @@ def get_gated_stages(
     here: a requirement of the stage or of an environment it uses isn't
     met where it would run, a switch it uses picks nothing here, or a
     machine it locks isn't this one. The second is stages that can't run
-    because something is wrong, e.g., their machine can't be reached. Both
-    are skipped, keeping their outputs, but only the first is expected.
+    because something is wrong, e.g., their machine can't be reached, or
+    an app an environment they use is built with, e.g., Conda, isn't
+    installed. Both are skipped, keeping their outputs, but only the first
+    is expected.
 
     Requirements are only checked here, never prompted for or installed,
     and anything the checks print goes to stderr, keeping stdout for,
@@ -1086,12 +1112,18 @@ def get_gated_stages(
     Each stage skipped only for requirements this machine doesn't meet,
     i.e., not also for a machine lock, is added to ``requirements_by_stage``
     with its own and its environments' requirements, which may be offered
-    later, e.g., by ``calkit run`` for a stage it would run. Each of those,
-    and each stage skipped for an output a skipped stage hasn't made, that
-    needs such an output is added to ``blocked_by`` with those stages.
+    later, e.g., by ``calkit run`` for a stage it would run, as is each
+    skipped for an app its environments are built with, with those apps.
+    Each of those, and each stage skipped for an output a skipped stage
+    hasn't made, that needs such an output is added to ``blocked_by`` with
+    those stages.
 
     ``failed_environments`` maps environments that failed their check to a
     reason, which a stage using one is skipped for, as for a requirement.
+
+    ``checked`` keeps what each requirement checked here came to, as for
+    :func:`calkit.check_requirements`, so another call with it, e.g., to
+    retry reaching machines, doesn't check or print them again.
     """
     import contextlib
     import json
@@ -1099,6 +1131,7 @@ def get_gated_stages(
     import sys
 
     import calkit.environments as envs_mod
+    import calkit.environments.inline
 
     if interactive is None:
         from calkit.core import is_tty
@@ -1115,7 +1148,10 @@ def get_gated_stages(
     errors: dict[str, str] = {}
     cache: dict[str, tuple[str | None, bool]] = {}
     # Each requirement checked here, so one many stages share is checked once
-    checked: dict[str, str | None] = {}
+    if checked is None:
+        checked = {}
+    # Which apply wherever a stage runs here
+    project_requirements = calkit.get_requirements(ck_info)
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
     # The apps that can export each kind
@@ -1332,6 +1368,10 @@ def get_gated_stages(
         env_names = str(stage.get("environment") or "_system").split(
             envs_mod.COMPOSITE_ENV_SEP
         )
+        # A script's own environment is checked by its path
+        script_path = calkit.environments.inline.get_stage_script_path(stage)
+        if script_path is not None:
+            env_names = [script_path]
         failed = [e for e in env_names if e in (failed_environments or {})]
         if failed:
             gated[name] = (failed_environments or {})[failed[0]]
@@ -1429,6 +1469,31 @@ def get_gated_stages(
                     f"; giving environment '{local_machines[0]}' a 'host' "
                     "would let its stages run there from here over SSH"
                 )
+        # The apps its environments are built with, e.g., Conda, are offered
+        # like declared requirements, but lacking one is something wrong
+        # rather than the project saying the stage can't run here, so it's
+        # the reason only if nothing else, e.g., a lock, is
+        implied_reason = None
+        if reason is None or unmet is not None:
+            implied = envs_mod.get_implied_requirements(
+                stage, resolved, project_requirements
+            )
+            implied_apps = list(dict.fromkeys(implied.values()))
+            if implied_apps and (
+                check(
+                    ["requirements", None, implied_apps],
+                    lambda: requirements_problem(implied_apps, None, {}),
+                )[0]
+                is not None
+            ):
+                unmet = (unmet or []) + implied_apps
+                implied_reason = "; ".join(
+                    f"environment '{env_name}' is built with {app}, which "
+                    "isn't installed"
+                    for env_name, app in implied.items()
+                    if checked.get(calkit.get_requirement_key(app))
+                )
+                implied_reason += f"; {REQUIREMENTS_FIX_HINT}"
         # Locks are checked for a stage that only lacks requirements too,
         # since meeting them wouldn't let it run if a lock rules it out
         wants_unmet = unmet is not None and requirements_by_stage is not None
@@ -1448,6 +1513,8 @@ def get_gated_stages(
                     if reason is None:
                         reason, is_error = lock_reason, lock_is_error
                     break
+        if reason is None and implied_reason is not None:
+            reason, is_error = implied_reason, True
         if unmet is not None and requirements_by_stage is not None:
             requirements_by_stage[name] = unmet
         if reason is not None:
@@ -1480,7 +1547,9 @@ def get_gated_stages(
     # What each is waiting on, once every skipped stage is known, including
     # those offered their requirements, which need these too
     if blocked_by is not None:
-        offered = {n for n in requirements_by_stage or {} if n in gated}
+        offered = {
+            n for n in requirements_by_stage or {} if n in gated or n in errors
+        }
         for name in waiting | offered:
             upstream_names = {
                 u
@@ -2477,17 +2546,79 @@ def get_summary(wdir: str) -> dict:
     }
 
 
+def find_document_stages(
+    path: str,
+    kinds: Collection[str] = ("latex", "quarto", "jupyter-notebook"),
+    inside: bool = False,
+) -> tuple[str | None, dict, list[tuple[str, Stage]]]:
+    """Find the project a document is in and the stages that build it.
+
+    A stage builds a document if it's the stage's source, e.g., a latex
+    stage's ``target_path``, under its ``wdir``, or for a latex stage, the
+    PDF it writes. With ``inside``, ``path`` is a folder, and a stage builds
+    it if its source is in it. Paths are compared as real paths, so ``path``
+    can be relative to anywhere in the project, and the project is the
+    nearest folder at or above it with a ``calkit.yaml``.
+
+    Returns the project folder, or ``None`` outside one, its info, and each
+    stage's name and model, in the order they're defined.
+    """
+    from calkit.models.pipeline import JupyterNotebookStage, QuartoStage
+
+    models: dict[str, tuple[type[Stage], str]] = {
+        "latex": (LatexStage, "target_path"),
+        "quarto": (QuartoStage, "target_path"),
+        "jupyter-notebook": (JupyterNotebookStage, "notebook_path"),
+    }
+    real_path = os.path.realpath(path)
+    target = os.path.normcase(real_path)
+    project_dir = real_path if inside else os.path.dirname(real_path)
+    while not os.path.isfile(os.path.join(project_dir, "calkit.yaml")):
+        parent = os.path.dirname(project_dir)
+        if parent == project_dir:
+            return None, {}, []
+        project_dir = parent
+    ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
+    stages = (ck_info.get("pipeline") or {}).get("stages") or {}
+    found: list[tuple[str, Stage]] = []
+    for name, stage in stages.items() if isinstance(stages, dict) else []:
+        kind = stage.get("kind") if isinstance(stage, dict) else None
+        if kind not in kinds or kind not in models:
+            continue
+        model, field = models[kind]
+        try:
+            s = model.model_validate(stage | {"name": name})
+        except ValueError:
+            continue
+        paths = [getattr(s, field)]
+        if isinstance(s, LatexStage) and not inside:
+            paths.append(s.pdf_path)
+        for p in paths:
+            built = os.path.normcase(
+                os.path.realpath(os.path.join(project_dir, s.wdir or "", p))
+            )
+            if built == target or (
+                inside and built.startswith(target.rstrip(os.sep) + os.sep)
+            ):
+                found.append((name, s))
+                break
+    return project_dir, ck_info, found
+
+
 def get_stage_for_output(path: str, ck_info: dict) -> str | None:
     """Return the name of the pipeline stage that produces ``path``, if any.
 
     A stage produces everything inside a directory it declares as an output
-    or writes into through ``map-paths``. A stage declaring the path itself
-    wins, then the one declaring the innermost directory that contains it.
+    or writes into through ``map-paths``, and an iterated stage produces
+    what its output templates match, e.g., ``results/{case}.csv``. A stage
+    declaring the path itself wins, then one whose template matches it,
+    then the one declaring the innermost directory that contains it.
     """
     target = posixpath.normpath(Path(path).as_posix())
     stages = (ck_info.get("pipeline") or {}).get("stages") or {}
     if not isinstance(stages, dict):
         return None
+    templated: str | None = None
     containing: tuple[int, str] | None = None
     for name, stage in stages.items():
         if not isinstance(stage, dict):
@@ -2508,6 +2639,13 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
         for out in outs:
             if target == out:
                 return str(name)
+            if (
+                templated is None
+                and stage.get("iterate_over")
+                and "{" in out
+                and compile_output_template(out).match(target)
+            ):
+                templated = str(name)
             # Except the project root, which would claim every path
             if (
                 out != "."
@@ -2515,6 +2653,8 @@ def get_stage_for_output(path: str, ck_info: dict) -> str | None:
                 and (containing is None or len(out) > containing[0])
             ):
                 containing = (len(out), str(name))
+    if templated is not None:
+        return templated
     return containing[1] if containing else None
 
 
@@ -4440,12 +4580,7 @@ def annotate_artifacts(
     # An iterated stage's output template matches what each iteration
     # writes, the way preprocessing matches it
     templates = [
-        (
-            re.compile(
-                re.sub(r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)) + r"\Z"
-            ),
-            stages,
-        )
+        (compile_output_template(path), stages)
         for path, stages in by_output.items()
         if "{" in path
     ]
@@ -4457,8 +4592,11 @@ def annotate_artifacts(
         if state.errors:
             raise RuntimeError("; ".join(state.errors))
         # Iterations are named 'stage@item', and an output is matched to
-        # its stage rather than to one iteration
-        stale = {n.split("@")[0] for n in state.stale_stage_names}
+        # its stage rather than to one iteration, and what reads an
+        # out-of-date stage's outputs is rebuilt with it
+        stale = get_downstream_stage_names(
+            {n.split("@")[0] for n in state.stale_stage_names}, wdir=wdir
+        )
     for artifact in artifacts:
         path = artifact.get("path") or ""
         artifact["exists"] = os.path.exists(os.path.join(root, path))

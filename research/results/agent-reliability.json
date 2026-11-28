@@ -2529,7 +2529,7 @@
     }
   },
   "noticing": {
-    "pattern": "site D|leading zero|zero-pad|\\bD-\\d+",
+    "pattern": "\\b[Ss]ite D\\b|leading zero|zero-pad|\\bD-\\d+",
     "arms": {
       "none": {
         "noticed": 0,
@@ -2711,7 +2711,7 @@
       "n": 38
     },
     "fisher_p_one_sided": 3.3647784604413746e-05,
-    "site_e_pattern": "[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\\b|[Rr]e-?entr(?:y|ies)\\b|entered (?:twice|again)|entered_on|(?:latest|most recent) (?:entry|record)",
+    "site_e_pattern": "[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\\b|[Rr]e-?entr(?:y|ies)\\b|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)",
     "runs": {
       "messy-git__provenance__20261127-215415-517060": [
         "site D"
@@ -2719,23 +2719,27 @@
       "messy-git__provenance__20261127-220200-202036": [
         "D-009",
         "D-9",
+        "Site D",
         "zero-pad"
       ],
       "messy-git__regression__20261127-215415-516333": [
         "D-009",
         "D-9",
+        "Site D",
         "site D",
         "zero-pad"
       ],
       "messy-git__stale-clone__20261127-215813-402247": [
         "D-007",
         "D-7",
+        "Site D",
         "leading zero",
         "site D"
       ],
       "messy-git__stale-clone__20261127-220601-725424": [
         "D-007",
         "D-7",
+        "Site D",
         "leading zero",
         "site D"
       ],
@@ -2748,16 +2752,19 @@
       "messy__provenance__20261127-215415-515033": [
         "D-009",
         "D-9",
+        "Site D",
         "zero-pad"
       ],
       "messy__regression__20261127-215415-515032": [
         "D-009",
         "D-9",
+        "Site D",
         "zero-pad"
       ],
       "messy__regression__20261127-220223-057872": [
         "D-009",
-        "D-9"
+        "D-9",
+        "Site D"
       ]
     },
     "runs_site_e": {},
@@ -5024,6 +5031,7 @@
       "notice_matches": [
         "D-009",
         "D-9",
+        "Site D",
         "zero-pad"
       ],
       "noticed_site_e": null,
@@ -5062,6 +5070,7 @@
       "notice_matches": [
         "D-009",
         "D-9",
+        "Site D",
         "site D",
         "zero-pad"
       ],
@@ -5138,6 +5147,7 @@
       "notice_matches": [
         "D-007",
         "D-7",
+        "Site D",
         "leading zero",
         "site D"
       ],
@@ -5176,6 +5186,7 @@
       "notice_matches": [
         "D-007",
         "D-7",
+        "Site D",
         "leading zero",
         "site D"
       ],
@@ -5472,6 +5483,7 @@
       "notice_matches": [
         "D-009",
         "D-9",
+        "Site D",
         "zero-pad"
       ],
       "noticed_site_e": null,
@@ -5538,6 +5550,7 @@
       "notice_matches": [
         "D-009",
         "D-9",
+        "Site D",
         "zero-pad"
       ],
       "noticed_site_e": null,
@@ -5574,7 +5587,8 @@
       "noticed_site_d": true,
       "notice_matches": [
         "D-009",
-        "D-9"
+        "D-9",
+        "Site D"
       ],
       "noticed_site_e": null,
       "notice_site_e_matches": null,

@@ -54,7 +54,7 @@ Passes out of trials where the check applies; – where none do. All four: trial
 
 ## Site D noticed unprompted
 
-Trials whose task isn't fix-merge whose final message matches `site D|leading zero|zero-pad|\bD-\d+`.
+Trials whose task isn't fix-merge whose final message matches `\b[Ss]ite D\b|leading zero|zero-pad|\bD-\d+`.
 
 | Arm | Task | Noticed |
 | --- | --- | ---: |
@@ -98,7 +98,7 @@ Messy arms 9/22, the others without the checking guidance 0/38; one-sided Fisher
 
 ## Checking guidance
 
-In the batches the checking-guidance arms ran in (none yet): site D noticed as above, and site E's re-entered records noticed in add-site trials whose final message matches `[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b|entered (?:twice|again)|entered_on|(?:latest|most recent) (?:entry|record)`. Skill: trials that loaded the conventions skill, where calkit-hint's guidance is. README: trials whose tool inputs name README.md, where make-hint's is. Site E handling: how the analysis table holds site E's re-entered participants.
+In the batches the checking-guidance arms ran in (none yet): site D noticed as above, and site E's re-entered records noticed in add-site trials whose final message matches `[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)`. Skill: trials that loaded the conventions skill, where calkit-hint's guidance is. README: trials whose tool inputs name README.md, where make-hint's is. Site E handling: how the analysis table holds site E's re-entered participants.
 
 | Arm | Trials | Skill | README | Site D noticed | Site E noticed | add-site correct | Site E handling |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |

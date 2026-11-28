@@ -46,12 +46,28 @@ ARMS = [
 ]
 MESSY = {"messy", "messy-git"}
 INTERVENTION_ARMS = ["messy-git", "make", "make-hint", "calkit", "calkit-hint"]
-NOTICE = re.compile(r"site D|leading zero|zero-pad|\bD-\d+")
+NOTICE = re.compile(r"\b[Ss]ite D\b|leading zero|zero-pad|\bD-\d+")
 # Site E's planted problem: four participants entered twice
 NOTICE_SITE_E = re.compile(
     r"[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b"
-    r"|entered (?:twice|again)|entered_on|(?:latest|most recent) (?:entry|record)"
+    r"|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)"
 )
+# A match with one of these just before it says there's no problem, e.g.,
+# "no duplicates found"
+NEGATION = re.compile(
+    r"\b(?:[Nn]o|[Nn]ot|[Nn]one|[Ww]ithout|[Nn]either)\b[^.\n]{0,25}$"
+)
+
+
+def find_affirmed(pattern: re.Pattern[str], text: str) -> list[str]:
+    """Get the matches of a pattern that no negation just before denies."""
+    return [
+        m.group(0)
+        for m in pattern.finditer(text)
+        if not NEGATION.search(text[max(0, m.start() - 30) : m.start()])
+    ]
+
+
 BENCHMARK = re.compile(
     r"agent-reliability/(?!envs/calkit-)|/reference/|audit-compare"
     r"|audit-private|" + re.escape(str(arms.CALKIT_REPO)) + r"(?![\w-])"
@@ -119,7 +135,9 @@ def read_run(batch: str, run: Path, templates: dict) -> dict:
         noticed = sorted(set(NOTICE.findall(t["final_message"])))
     noticed_e = None
     if meta["task"] == "add-site" and t["final_message"] is not None:
-        noticed_e = sorted(set(NOTICE_SITE_E.findall(t["final_message"])))
+        noticed_e = sorted(
+            set(find_affirmed(NOTICE_SITE_E, t["final_message"]))
+        )
     key = ("stale/" if meta["task"] == "stale-clone" else "") + (
         arms.get_template_name(meta["arm"])
     )

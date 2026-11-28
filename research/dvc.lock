@@ -544,8 +544,8 @@ stages:
       size: 13930
     - path: agent-reliability/bench/summarize.py
       hash: md5
-      md5: 687e39ae2c96076143d38674799a2d5c
-      size: 19968
+      md5: 802cebdbfc16f91be3473ca7091d59f3
+      size: 20487
     - path: agent-reliability/grades/batch-1
       hash: md5
       md5: 895040233a82eb77d643ef1913736c2c.dir
@@ -587,12 +587,12 @@ stages:
     outs:
     - path: results/agent-reliability.json
       hash: md5
-      md5: 3e76b97b5121e1229130a79d818aa304
-      size: 136881
+      md5: a8029830eb2160641a8a846a321a430a
+      size: 137131
     - path: results/agent-reliability.md
       hash: md5
-      md5: d88242c4eb49793aab00f8a220eeadb2
-      size: 10663
+      md5: 081e83198ddab13c556f3242bf2121c0
+      size: 10659
   verify-agent-reliability-graders:
     cmd: calkit xenv -n agent-reliability --no-check -- python 
       agent-reliability/bench/verify.py 

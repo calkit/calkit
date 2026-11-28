@@ -150,6 +150,14 @@ RelativeChildPathString = Annotated[
 ]
 
 
+def compile_output_template(path: str) -> re.Pattern[str]:
+    """Compile an iterated stage's output template, e.g., ``plot-{n}.png``,
+    into a pattern matching what each iteration writes."""
+    return re.compile(
+        re.sub(r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)) + r"\Z"
+    )
+
+
 def _non_glob_prefix(path: str) -> str:
     """Return the longest leading portion of a path containing no glob
     characters, so a pattern can be reduced to something usable as a DVC
@@ -4100,14 +4108,7 @@ class Pipeline(Model):
                     posixpath.join(stage.wdir or "", path)
                 )
                 if stage.iterate_over and "{" in path:
-                    patterns.append(
-                        re.compile(
-                            re.sub(
-                                r"(?:\\\$)?\\\{.*?\\\}", ".+", re.escape(path)
-                            )
-                            + r"\Z"
-                        )
-                    )
+                    patterns.append(compile_output_template(path))
                 elif "${" not in path:
                     outputs.add(path)
 

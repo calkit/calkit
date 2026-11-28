@@ -558,9 +558,9 @@ stages:
       nfiles: 46
     - path: agent-reliability/grades/batch-3
       hash: md5
-      md5: d751713988987e9331980363e24189ce.dir
-      size: 0
-      nfiles: 0
+      md5: 582df01075d30e3ce81735f4166d6a88.dir
+      size: 581286
+      nfiles: 40
     - path: agent-reliability/runs/batch-1
       hash: md5
       md5: aa16909691318876767e3337c207bb1c.dir
@@ -573,9 +573,9 @@ stages:
       nfiles: 368
     - path: agent-reliability/runs/batch-3
       hash: md5
-      md5: 228cbd239caeabcb127f52f266ee6c5b.dir
-      size: 19
-      nfiles: 1
+      md5: a80f30cee0dbc100fb93f95f3c0813cb.dir
+      size: 24715501
+      nfiles: 281
     - path: agent-reliability/templates.json
       hash: md5
       md5: 24000b52bf659b60c936046d638b6824
@@ -587,12 +587,12 @@ stages:
     outs:
     - path: results/agent-reliability.json
       hash: md5
-      md5: a8029830eb2160641a8a846a321a430a
-      size: 137131
+      md5: b2a931ea61c47860b59468bbee98d665
+      size: 207455
     - path: results/agent-reliability.md
       hash: md5
-      md5: 081e83198ddab13c556f3242bf2121c0
-      size: 10659
+      md5: 976577d6fab79a9226eb300085eb12ed
+      size: 14695
   verify-agent-reliability-graders:
     cmd: calkit xenv -n agent-reliability --no-check -- python 
       agent-reliability/bench/verify.py 
@@ -703,28 +703,28 @@ stages:
       size: 8
     - path: agent-reliability/batches/batch-3.csv
       hash: md5
-      md5: 1608460df43f1bcc33588a65320787a2
-      size: 19
+      md5: 8713a029e10041784c831e5963f5723d
+      size: 1631
     - path: agent-reliability/bench/archive.py
       hash: md5
       md5: 6f96c5e062a9b79a3a51f7b67e400856
       size: 3199
     - path: agent-reliability/bench/arms.py
       hash: md5
-      md5: 8749dc4431e9ef8b9d5f3ac19f987194
-      size: 11757
+      md5: ba615d76f8100db205fb94767f650c82
+      size: 13930
     - path: agent-reliability/bench/new_run.py
       hash: md5
-      md5: 224fc631265cc52ff9696ba6d9c59ccf
-      size: 8944
+      md5: a15c9240fcbd03acff2ba2cdd57e97ca
+      size: 9311
     - path: agent-reliability/bench/report.py
       hash: md5
       md5: 294c566d8cf66c52dcfce0cfa690c8c8
       size: 7831
     - path: agent-reliability/bench/run_batch.py
       hash: md5
-      md5: fc2c9e2fd8eabb34ddf969065a0543ef
-      size: 6493
+      md5: 6e6d4f51e47f83be02a39fa7a957edf1
+      size: 6807
     - path: agent-reliability/build/snapshot_calkit.sh
       hash: md5
       md5: f81914c853294452884cc9d597e127f9
@@ -733,6 +733,16 @@ stages:
       hash: md5
       md5: 3bcb2940b2e7f077d222d7c865b4387a
       size: 20021
+    - path: agent-reliability/incoming/site-e
+      hash: md5
+      md5: f2f9ba228c0787d3d56a815a57f6e128.dir
+      size: 8937
+      nfiles: 3
+    - path: agent-reliability/interventions
+      hash: md5
+      md5: d2c160b2cd2575cc17b90378ba8058e5.dir
+      size: 1213
+      nfiles: 2
     - path: agent-reliability/preambles
       hash: md5
       md5: 6f765457e34acf7344358a8d1e44ee7a.dir
@@ -740,22 +750,22 @@ stages:
       nfiles: 5
     - path: agent-reliability/reference
       hash: md5
-      md5: aacae8b509274ea2f60e1435c12660c4.dir
-      size: 736514
-      nfiles: 30
+      md5: bf8cc2dd392c9a462f37ad333616fbe2.dir
+      size: 816093
+      nfiles: 33
     - path: agent-reliability/tasks
       hash: md5
-      md5: febf7a0113ceb64fc74917f6aab2fc5f.dir
-      size: 1725
-      nfiles: 9
+      md5: 942998d2a9d30c3f96fab9b30bd00c2a.dir
+      size: 1893
+      nfiles: 10
     - path: agent-reliability/templates.json
       hash: md5
-      md5: eb477852bc2b3ba7b7edd0b731c11339
-      size: 19441
+      md5: 24000b52bf659b60c936046d638b6824
+      size: 23634
     - path: agent-reliability/templates.tar.gz
       hash: md5
-      md5: 757e8141d4a21a8f3670107c2cf4baf3
-      size: 2632568
+      md5: 25ba55693c9ef5d999a319a753cd0267
+      size: 3138475
     - path: agent-reliability/uv.lock
       hash: md5
       md5: a5c1b418ed502e49e7aaa117e1d58fa3
@@ -767,9 +777,9 @@ stages:
     outs:
     - path: agent-reliability/runs/batch-3
       hash: md5
-      md5: 228cbd239caeabcb127f52f266ee6c5b.dir
-      size: 19
-      nfiles: 1
+      md5: a80f30cee0dbc100fb93f95f3c0813cb.dir
+      size: 24715501
+      nfiles: 281
   rank-workflow-levers:
     cmd: uv run --locked --script scripts/rank-workflow-levers.py ../docs/roi 
       results/workflow-levers.json
@@ -846,9 +856,9 @@ stages:
       nfiles: 33
     - path: agent-reliability/runs/batch-3
       hash: md5
-      md5: 228cbd239caeabcb127f52f266ee6c5b.dir
-      size: 19
-      nfiles: 1
+      md5: a80f30cee0dbc100fb93f95f3c0813cb.dir
+      size: 24715501
+      nfiles: 281
     - path: agent-reliability/uv.lock
       hash: md5
       md5: a5c1b418ed502e49e7aaa117e1d58fa3
@@ -860,6 +870,6 @@ stages:
     outs:
     - path: agent-reliability/grades/batch-3
       hash: md5
-      md5: d751713988987e9331980363e24189ce.dir
-      size: 0
-      nfiles: 0
+      md5: 582df01075d30e3ce81735f4166d6a88.dir
+      size: 581286
+      nfiles: 40

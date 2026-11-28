@@ -8,9 +8,11 @@ Passes out of trials where the check applies; – where none do. All four: trial
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | none | 8 | 0 | 8/8 | 8/8 | 8/8 | 0/8 | – | 0 | 0.29 | 1.3 | 8 |
 | messy | 12 | 4 | 12/12 | 8/8 | 12/12 | 0/8 | 8/8 | 0 | 0.41 | 1.6 | 9 |
-| messy-git | 14 | 4 | 12/14 | 10/10 | 14/14 | 0/10 | 8/8 | 2 | 0.38 | 1.5 | 10 |
-| make | 18 | 18 | 18/18 | 14/14 | 18/18 | 14/14 | 4/4 | 0 | 0.28 | 1.2 | 8 |
-| calkit | 18 | 18 | 18/18 | 14/14 | 18/18 | 14/14 | 4/4 | 0 | 0.40 | 1.4 | 11 |
+| messy-git | 22 | 4 | 17/22 | 18/18 | 22/22 | 0/18 | 12/14 | 4 | 0.40 | 1.7 | 11 |
+| make | 26 | 25 | 25/26 | 22/22 | 26/26 | 22/22 | 8/10 | 1 | 0.29 | 1.3 | 8 |
+| make-hint | 8 | 3 | 3/8 | 8/8 | 8/8 | 8/8 | 2/6 | 4 | 0.38 | 1.8 | 11 |
+| calkit | 26 | 24 | 24/26 | 22/22 | 26/26 | 22/22 | 8/10 | 2 | 0.41 | 1.6 | 11 |
+| calkit-hint | 8 | 5 | 5/8 | 8/8 | 8/8 | 8/8 | 4/6 | 3 | 0.46 | 2.0 | 14 |
 
 ## By batch, arm, and task
 
@@ -51,6 +53,26 @@ Passes out of trials where the check applies; – where none do. All four: trial
 | batch-2 | calkit | regression | 2 | 2/2 | – | 2/2 | – | – | 0 | 0.51 | 1.7 | 12 |
 | batch-2 | calkit | stale-clone | 2 | 2/2 | 2/2 | 2/2 | 2/2 | – | 0 | 0.34 | 1.1 | 10 |
 | batch-2 | calkit | undo | 2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 0 | 0.34 | 1.3 | 10 |
+| batch-3 | messy-git | add-site | 2 | 1/2 | 2/2 | 2/2 | 0/2 | 1/2 | 1 | 0.60 | 2.5 | 15 |
+| batch-3 | messy-git | data-correction | 2 | 2/2 | 2/2 | 2/2 | 0/2 | 2/2 | 0 | 0.42 | 1.9 | 12 |
+| batch-3 | messy-git | distant-consumer | 2 | 1/2 | 2/2 | 2/2 | 0/2 | 1/2 | 0 | 0.34 | 1.6 | 10 |
+| batch-3 | messy-git | stale-clone | 2 | 1/2 | 2/2 | 2/2 | 0/2 | – | 1 | 0.36 | 1.6 | 12 |
+| batch-3 | make | add-site | 2 | 1/2 | 2/2 | 2/2 | 2/2 | 0/2 | 1 | 0.48 | 2.1 | 13 |
+| batch-3 | make | data-correction | 2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 0 | 0.31 | 1.6 | 10 |
+| batch-3 | make | distant-consumer | 2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 0 | 0.29 | 1.6 | 8 |
+| batch-3 | make | stale-clone | 2 | 2/2 | 2/2 | 2/2 | 2/2 | – | 0 | 0.19 | 1.0 | 6 |
+| batch-3 | make-hint | add-site | 2 | 0/2 | 2/2 | 2/2 | 2/2 | 0/2 | 2 | 0.53 | 2.4 | 15 |
+| batch-3 | make-hint | data-correction | 2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 0 | 0.35 | 1.6 | 10 |
+| batch-3 | make-hint | distant-consumer | 2 | 0/2 | 2/2 | 2/2 | 2/2 | 0/2 | 1 | 0.34 | 1.7 | 10 |
+| batch-3 | make-hint | stale-clone | 2 | 1/2 | 2/2 | 2/2 | 2/2 | – | 1 | 0.29 | 1.5 | 8 |
+| batch-3 | calkit | add-site | 2 | 0/2 | 2/2 | 2/2 | 2/2 | 0/2 | 2 | 0.74 | 3.3 | 20 |
+| batch-3 | calkit | data-correction | 2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 0 | 0.38 | 1.6 | 12 |
+| batch-3 | calkit | distant-consumer | 2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 0 | 0.40 | 1.6 | 10 |
+| batch-3 | calkit | stale-clone | 2 | 2/2 | 2/2 | 2/2 | 2/2 | – | 0 | 0.29 | 1.2 | 8 |
+| batch-3 | calkit-hint | add-site | 2 | 1/2 | 2/2 | 2/2 | 2/2 | 0/2 | 1 | 0.65 | 2.8 | 18 |
+| batch-3 | calkit-hint | data-correction | 2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 0 | 0.35 | 1.4 | 10 |
+| batch-3 | calkit-hint | distant-consumer | 2 | 2/2 | 2/2 | 2/2 | 2/2 | 2/2 | 0 | 0.40 | 1.8 | 12 |
+| batch-3 | calkit-hint | stale-clone | 2 | 0/2 | 2/2 | 2/2 | 2/2 | – | 2 | 0.43 | 1.9 | 15 |
 
 ## Site D noticed unprompted
 
@@ -68,54 +90,67 @@ Trials whose task isn't fix-merge whose final message matches `\b[Ss]ite D\b|lea
 | messy | regression | 2/2 |
 | messy | undo | 0/2 |
 | messy | all | 4/10 |
-| messy-git | data-correction | 0/2 |
-| messy-git | distant-consumer | 0/2 |
+| messy-git | add-site | 2/2 |
+| messy-git | data-correction | 0/4 |
+| messy-git | distant-consumer | 0/4 |
 | messy-git | provenance | 2/2 |
 | messy-git | regression | 1/2 |
-| messy-git | stale-clone | 2/2 |
+| messy-git | stale-clone | 3/4 |
 | messy-git | undo | 0/2 |
-| messy-git | all | 5/12 |
-| make | data-correction | 0/2 |
-| make | distant-consumer | 0/2 |
+| messy-git | all | 8/20 |
+| make | add-site | 2/2 |
+| make | data-correction | 0/4 |
+| make | distant-consumer | 0/4 |
 | make | filter | 0/2 |
 | make | new-question | 0/2 |
 | make | provenance | 0/2 |
 | make | regression | 0/2 |
-| make | stale-clone | 0/2 |
+| make | stale-clone | 0/4 |
 | make | undo | 0/2 |
-| make | all | 0/16 |
-| calkit | data-correction | 0/2 |
-| calkit | distant-consumer | 0/2 |
+| make | all | 2/24 |
+| make-hint | add-site | 2/2 |
+| make-hint | data-correction | 2/2 |
+| make-hint | distant-consumer | 2/2 |
+| make-hint | stale-clone | 2/2 |
+| make-hint | all | 8/8 |
+| calkit | add-site | 2/2 |
+| calkit | data-correction | 0/4 |
+| calkit | distant-consumer | 0/4 |
 | calkit | filter | 0/2 |
 | calkit | new-question | 0/2 |
 | calkit | provenance | 0/2 |
 | calkit | regression | 0/2 |
-| calkit | stale-clone | 0/2 |
+| calkit | stale-clone | 0/4 |
 | calkit | undo | 0/2 |
-| calkit | all | 0/16 |
+| calkit | all | 2/24 |
+| calkit-hint | add-site | 2/2 |
+| calkit-hint | data-correction | 0/2 |
+| calkit-hint | distant-consumer | 2/2 |
+| calkit-hint | stale-clone | 2/2 |
+| calkit-hint | all | 6/8 |
 
-Messy arms 9/22, the others without the checking guidance 0/38; one-sided Fisher exact p = 3.4e-05.
+Messy arms 12/30, the others without the checking guidance 4/54; one-sided Fisher exact p = 0.00048.
 
 ## Checking guidance
 
-In the batches the checking-guidance arms ran in (none yet): site D noticed as above, and site E's re-entered records noticed in add-site trials whose final message matches `[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)`. Skill: trials that loaded the conventions skill, where calkit-hint's guidance is. README: trials whose tool inputs name README.md, where make-hint's is. Site E handling: how the analysis table holds site E's re-entered participants.
+In the batches the checking-guidance arms ran in (batch-3): site D noticed as above, and site E's re-entered records noticed in add-site trials whose final message matches `[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)`. Skill: trials that loaded the conventions skill, where calkit-hint's guidance is. README: trials whose tool inputs name README.md, where make-hint's is. Site E handling: how the analysis table holds site E's re-entered participants.
 
 | Arm | Trials | Skill | README | Site D noticed | Site E noticed | add-site correct | Site E handling |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| messy-git | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
-| make | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
-| make-hint | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
-| calkit | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
-| calkit-hint | 0 | 0 | 0 | 0/0 | 0/0 | 0/0 | – |
+| messy-git | 8 | 0 | 7 | 3/8 | 2/2 | 1/2 | correct 2 |
+| make | 8 | 0 | 3 | 2/8 | 2/2 | 1/2 | correct 2 |
+| make-hint | 8 | 0 | 4 | 8/8 | 1/2 | 0/2 | correct 2 |
+| calkit | 8 | 8 | 7 | 2/8 | 1/2 | 0/2 | correct 2 |
+| calkit-hint | 8 | 8 | 6 | 6/8 | 2/2 | 1/2 | correct 2 |
 
 | calkit-hint against | Test | Site D p | Site E p |
 | --- | --- | ---: | ---: |
-| calkit | Fisher exact, greater | 1 | 1 |
-| make-hint | Fisher exact, two-sided | 1 | 1 |
+| calkit | Fisher exact, greater | 0.066 | 0.5 |
+| make-hint | Fisher exact, two-sided | 0.47 | 1 |
 
 ## Isolation
 
-Trials whose tool inputs mention the benchmark itself: 0; that name any path outside their run and Calkit snapshot: 28.
+Trials whose tool inputs mention the benchmark itself: 0; that name any path outside their run and Calkit snapshot: 45.
 
 | Run | Benchmark | Outside paths |
 | --- | --- | --- |
@@ -147,6 +182,23 @@ Trials whose tool inputs mention the benchmark itself: 0; that name any path out
 | messy__regression__20261127-215415-515032 |  | `/private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/chg` |
 | messy__regression__20261127-220223-057872 |  | `/private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/chk`, `/private/tmp/claude-501/-Users-pete-dev-calkit-s3/3e2d7dae-22cf-428e-b17f-eab18b059494/scratchpad/chk/rep.py` |
 | messy__undo__20261127-215613-406042 |  | `/tmp/bak_undo`, `/tmp/bak_undo/`, `/tmp/bak_undo/paper/draft.md` |
+| calkit-hint__add-site__1 |  | `/tmp/patch.py`, `/tmp/patch2.py` |
+| calkit-hint__add-site__2 |  | `/tmp/x.json` |
+| calkit-hint__stale-clone__1 |  | `/tmp/old-ancova.json` |
+| calkit-hint__stale-clone__2 |  | `/tmp/oldres`, `/tmp/oldres/`, `/tmp/oldres/report.md` |
+| calkit__data-correction__2 |  | `/tmp/old-ancova.json`, `/tmp/old-change.json` |
+| calkit__stale-clone__1 |  | `/tmp/old_report.md` |
+| make-hint__add-site__1 |  | `/tmp/r.md` |
+| make-hint__data-correction__1 |  | `/tmp/dcheck`, `/tmp/dcheck/a.csv`, `/tmp/dcheck/m.json`, `/tmp/dcheck/sessions.csv`, and 4 more |
+| make-hint__data-correction__2 |  | `/tmp/old_analysis.csv`, `/tmp/old_change.json` |
+| make-hint__distant-consumer__1 |  | `/tmp/old_ancova.json` |
+| make-hint__stale-clone__1 |  | `/tmp/old_report.md` |
+| make-hint__stale-clone__2 |  | `/tmp/dcheck`, `/tmp/dcheck/a.csv`, `/tmp/dcheck/m.json`, `/tmp/dcheck/sessions_fixed.csv`, and 1 more |
+| make__data-correction__2 |  | `/tmp/report_old.md` |
+| make__stale-clone__1 |  | `/tmp/old_report.md` |
+| make__stale-clone__2 |  | `/tmp/old_report.md` |
+| messy-git__add-site__1 |  | `/tmp/old_merged.csv` |
+| messy-git__stale-clone__2 |  | `/tmp/old_ancova.json`, `/tmp/old_merged_final.csv` |
 
 ## Starting templates against the current build
 
@@ -162,3 +214,11 @@ Trials whose tool inputs mention the benchmark itself: 0; that name any path out
 | batch-2 | stale/calkit | no | `.calkit/stage-runs.json` |
 | batch-2 | stale/make | yes | none |
 | batch-2 | stale/messy-git | yes | none |
+| batch-3 | calkit | yes | none |
+| batch-3 | make | yes | none |
+| batch-3 | make-hint | yes | none |
+| batch-3 | messy-git | yes | none |
+| batch-3 | stale/calkit | yes | none |
+| batch-3 | stale/make | yes | none |
+| batch-3 | stale/make-hint | yes | none |
+| batch-3 | stale/messy-git | yes | none |

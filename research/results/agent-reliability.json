@@ -4,7 +4,7 @@
     "batch-2",
     "batch-3"
   ],
-  "n_runs": 70,
+  "n_runs": 110,
   "by_batch": {
     "batch-1": {
       "all": {
@@ -1316,33 +1316,778 @@
     },
     "batch-3": {
       "all": {
-        "n": 0,
-        "n_all_pass": 0,
+        "n": 40,
+        "n_all_pass": 21,
         "correct": {
-          "pass": 0,
-          "n": 0
+          "pass": 26,
+          "n": 40
         },
         "consistent": {
-          "pass": 0,
-          "n": 0
+          "pass": 40,
+          "n": 40
         },
         "damage": {
-          "pass": 0,
-          "n": 0
+          "pass": 40,
+          "n": 40
         },
         "traceable": {
-          "pass": 0,
-          "n": 0
+          "pass": 32,
+          "n": 40
         },
         "distant": {
-          "pass": 0,
-          "n": 0
+          "pass": 18,
+          "n": 30
         },
-        "n_incorrect_from_also_fixing": 0,
-        "mean_cost_usd": null,
-        "total_cost_usd": 0,
-        "mean_minutes": null,
-        "mean_turns": null
+        "n_incorrect_from_also_fixing": 12,
+        "mean_cost_usd": 0.408,
+        "total_cost_usd": 16.33,
+        "mean_minutes": 1.839,
+        "mean_turns": 11.525
+      },
+      "messy-git": {
+        "all": {
+          "n": 8,
+          "n_all_pass": 0,
+          "correct": {
+            "pass": 5,
+            "n": 8
+          },
+          "consistent": {
+            "pass": 8,
+            "n": 8
+          },
+          "damage": {
+            "pass": 8,
+            "n": 8
+          },
+          "traceable": {
+            "pass": 0,
+            "n": 8
+          },
+          "distant": {
+            "pass": 4,
+            "n": 6
+          },
+          "n_incorrect_from_also_fixing": 2,
+          "mean_cost_usd": 0.433,
+          "total_cost_usd": 3.46,
+          "mean_minutes": 1.906,
+          "mean_turns": 12.125
+        },
+        "tasks": {
+          "add-site": {
+            "n": 2,
+            "n_all_pass": 0,
+            "correct": {
+              "pass": 1,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 0,
+              "n": 2
+            },
+            "distant": {
+              "pass": 1,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 1,
+            "mean_cost_usd": 0.601,
+            "total_cost_usd": 1.2,
+            "mean_minutes": 2.458,
+            "mean_turns": 15.0
+          },
+          "data-correction": {
+            "n": 2,
+            "n_all_pass": 0,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 0,
+              "n": 2
+            },
+            "distant": {
+              "pass": 2,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.424,
+            "total_cost_usd": 0.85,
+            "mean_minutes": 1.925,
+            "mean_turns": 12.0
+          },
+          "distant-consumer": {
+            "n": 2,
+            "n_all_pass": 0,
+            "correct": {
+              "pass": 1,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 0,
+              "n": 2
+            },
+            "distant": {
+              "pass": 1,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.345,
+            "total_cost_usd": 0.69,
+            "mean_minutes": 1.633,
+            "mean_turns": 10.0
+          },
+          "stale-clone": {
+            "n": 2,
+            "n_all_pass": 0,
+            "correct": {
+              "pass": 1,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 0,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 0
+            },
+            "n_incorrect_from_also_fixing": 1,
+            "mean_cost_usd": 0.362,
+            "total_cost_usd": 0.72,
+            "mean_minutes": 1.608,
+            "mean_turns": 11.5
+          }
+        }
+      },
+      "make": {
+        "all": {
+          "n": 8,
+          "n_all_pass": 7,
+          "correct": {
+            "pass": 7,
+            "n": 8
+          },
+          "consistent": {
+            "pass": 8,
+            "n": 8
+          },
+          "damage": {
+            "pass": 8,
+            "n": 8
+          },
+          "traceable": {
+            "pass": 8,
+            "n": 8
+          },
+          "distant": {
+            "pass": 4,
+            "n": 6
+          },
+          "n_incorrect_from_also_fixing": 1,
+          "mean_cost_usd": 0.319,
+          "total_cost_usd": 2.55,
+          "mean_minutes": 1.538,
+          "mean_turns": 9.0
+        },
+        "tasks": {
+          "add-site": {
+            "n": 2,
+            "n_all_pass": 1,
+            "correct": {
+              "pass": 1,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 1,
+            "mean_cost_usd": 0.48,
+            "total_cost_usd": 0.96,
+            "mean_minutes": 2.067,
+            "mean_turns": 13.0
+          },
+          "data-correction": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 2,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.306,
+            "total_cost_usd": 0.61,
+            "mean_minutes": 1.558,
+            "mean_turns": 9.5
+          },
+          "distant-consumer": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 2,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.294,
+            "total_cost_usd": 0.59,
+            "mean_minutes": 1.558,
+            "mean_turns": 8.0
+          },
+          "stale-clone": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 0
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.194,
+            "total_cost_usd": 0.39,
+            "mean_minutes": 0.967,
+            "mean_turns": 5.5
+          }
+        }
+      },
+      "make-hint": {
+        "all": {
+          "n": 8,
+          "n_all_pass": 3,
+          "correct": {
+            "pass": 3,
+            "n": 8
+          },
+          "consistent": {
+            "pass": 8,
+            "n": 8
+          },
+          "damage": {
+            "pass": 8,
+            "n": 8
+          },
+          "traceable": {
+            "pass": 8,
+            "n": 8
+          },
+          "distant": {
+            "pass": 2,
+            "n": 6
+          },
+          "n_incorrect_from_also_fixing": 4,
+          "mean_cost_usd": 0.377,
+          "total_cost_usd": 3.01,
+          "mean_minutes": 1.815,
+          "mean_turns": 10.625
+        },
+        "tasks": {
+          "add-site": {
+            "n": 2,
+            "n_all_pass": 0,
+            "correct": {
+              "pass": 0,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 2,
+            "mean_cost_usd": 0.525,
+            "total_cost_usd": 1.05,
+            "mean_minutes": 2.417,
+            "mean_turns": 15.0
+          },
+          "data-correction": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 2,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.347,
+            "total_cost_usd": 0.69,
+            "mean_minutes": 1.617,
+            "mean_turns": 9.5
+          },
+          "distant-consumer": {
+            "n": 2,
+            "n_all_pass": 0,
+            "correct": {
+              "pass": 0,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 1,
+            "mean_cost_usd": 0.34,
+            "total_cost_usd": 0.68,
+            "mean_minutes": 1.683,
+            "mean_turns": 9.5
+          },
+          "stale-clone": {
+            "n": 2,
+            "n_all_pass": 1,
+            "correct": {
+              "pass": 1,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 0
+            },
+            "n_incorrect_from_also_fixing": 1,
+            "mean_cost_usd": 0.295,
+            "total_cost_usd": 0.59,
+            "mean_minutes": 1.542,
+            "mean_turns": 8.5
+          }
+        }
+      },
+      "calkit": {
+        "all": {
+          "n": 8,
+          "n_all_pass": 6,
+          "correct": {
+            "pass": 6,
+            "n": 8
+          },
+          "consistent": {
+            "pass": 8,
+            "n": 8
+          },
+          "damage": {
+            "pass": 8,
+            "n": 8
+          },
+          "traceable": {
+            "pass": 8,
+            "n": 8
+          },
+          "distant": {
+            "pass": 4,
+            "n": 6
+          },
+          "n_incorrect_from_also_fixing": 2,
+          "mean_cost_usd": 0.453,
+          "total_cost_usd": 3.62,
+          "mean_minutes": 1.962,
+          "mean_turns": 12.375
+        },
+        "tasks": {
+          "add-site": {
+            "n": 2,
+            "n_all_pass": 0,
+            "correct": {
+              "pass": 0,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 2,
+            "mean_cost_usd": 0.744,
+            "total_cost_usd": 1.49,
+            "mean_minutes": 3.342,
+            "mean_turns": 19.5
+          },
+          "data-correction": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 2,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.384,
+            "total_cost_usd": 0.77,
+            "mean_minutes": 1.642,
+            "mean_turns": 11.5
+          },
+          "distant-consumer": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 2,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.396,
+            "total_cost_usd": 0.79,
+            "mean_minutes": 1.633,
+            "mean_turns": 10.0
+          },
+          "stale-clone": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 0
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.287,
+            "total_cost_usd": 0.57,
+            "mean_minutes": 1.233,
+            "mean_turns": 8.5
+          }
+        }
+      },
+      "calkit-hint": {
+        "all": {
+          "n": 8,
+          "n_all_pass": 5,
+          "correct": {
+            "pass": 5,
+            "n": 8
+          },
+          "consistent": {
+            "pass": 8,
+            "n": 8
+          },
+          "damage": {
+            "pass": 8,
+            "n": 8
+          },
+          "traceable": {
+            "pass": 8,
+            "n": 8
+          },
+          "distant": {
+            "pass": 4,
+            "n": 6
+          },
+          "n_incorrect_from_also_fixing": 3,
+          "mean_cost_usd": 0.46,
+          "total_cost_usd": 3.68,
+          "mean_minutes": 1.975,
+          "mean_turns": 13.5
+        },
+        "tasks": {
+          "add-site": {
+            "n": 2,
+            "n_all_pass": 1,
+            "correct": {
+              "pass": 1,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 1,
+            "mean_cost_usd": 0.65,
+            "total_cost_usd": 1.3,
+            "mean_minutes": 2.767,
+            "mean_turns": 18.0
+          },
+          "data-correction": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 2,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.352,
+            "total_cost_usd": 0.7,
+            "mean_minutes": 1.45,
+            "mean_turns": 9.5
+          },
+          "distant-consumer": {
+            "n": 2,
+            "n_all_pass": 2,
+            "correct": {
+              "pass": 2,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 2,
+              "n": 2
+            },
+            "n_incorrect_from_also_fixing": 0,
+            "mean_cost_usd": 0.403,
+            "total_cost_usd": 0.81,
+            "mean_minutes": 1.8,
+            "mean_turns": 11.5
+          },
+          "stale-clone": {
+            "n": 2,
+            "n_all_pass": 0,
+            "correct": {
+              "pass": 0,
+              "n": 2
+            },
+            "consistent": {
+              "pass": 2,
+              "n": 2
+            },
+            "damage": {
+              "pass": 2,
+              "n": 2
+            },
+            "traceable": {
+              "pass": 2,
+              "n": 2
+            },
+            "distant": {
+              "pass": 0,
+              "n": 0
+            },
+            "n_incorrect_from_also_fixing": 2,
+            "mean_cost_usd": 0.432,
+            "total_cost_usd": 0.86,
+            "mean_minutes": 1.883,
+            "mean_turns": 15.0
+          }
+        }
       }
     }
   },
@@ -1705,40 +2450,40 @@
     },
     "messy-git": {
       "all": {
-        "n": 14,
+        "n": 22,
         "n_all_pass": 4,
         "correct": {
-          "pass": 12,
-          "n": 14
+          "pass": 17,
+          "n": 22
         },
         "consistent": {
-          "pass": 10,
-          "n": 10
+          "pass": 18,
+          "n": 18
         },
         "damage": {
-          "pass": 14,
-          "n": 14
+          "pass": 22,
+          "n": 22
         },
         "traceable": {
           "pass": 0,
-          "n": 10
+          "n": 18
         },
         "distant": {
-          "pass": 8,
-          "n": 8
+          "pass": 12,
+          "n": 14
         },
-        "n_incorrect_from_also_fixing": 2,
-        "mean_cost_usd": 0.382,
-        "total_cost_usd": 5.34,
-        "mean_minutes": 1.51,
-        "mean_turns": 10.357
+        "n_incorrect_from_also_fixing": 4,
+        "mean_cost_usd": 0.4,
+        "total_cost_usd": 8.81,
+        "mean_minutes": 1.654,
+        "mean_turns": 11.0
       },
       "tasks": {
-        "data-correction": {
+        "add-site": {
           "n": 2,
           "n_all_pass": 0,
           "correct": {
-            "pass": 2,
+            "pass": 1,
             "n": 2
           },
           "consistent": {
@@ -1754,43 +2499,72 @@
             "n": 2
           },
           "distant": {
-            "pass": 2,
+            "pass": 1,
             "n": 2
           },
+          "n_incorrect_from_also_fixing": 1,
+          "mean_cost_usd": 0.601,
+          "total_cost_usd": 1.2,
+          "mean_minutes": 2.458,
+          "mean_turns": 15.0
+        },
+        "data-correction": {
+          "n": 4,
+          "n_all_pass": 0,
+          "correct": {
+            "pass": 4,
+            "n": 4
+          },
+          "consistent": {
+            "pass": 4,
+            "n": 4
+          },
+          "damage": {
+            "pass": 4,
+            "n": 4
+          },
+          "traceable": {
+            "pass": 0,
+            "n": 4
+          },
+          "distant": {
+            "pass": 4,
+            "n": 4
+          },
           "n_incorrect_from_also_fixing": 0,
-          "mean_cost_usd": 0.319,
-          "total_cost_usd": 0.64,
-          "mean_minutes": 1.358,
-          "mean_turns": 9.5
+          "mean_cost_usd": 0.372,
+          "total_cost_usd": 1.49,
+          "mean_minutes": 1.642,
+          "mean_turns": 10.75
         },
         "distant-consumer": {
-          "n": 2,
+          "n": 4,
           "n_all_pass": 0,
           "correct": {
-            "pass": 2,
-            "n": 2
+            "pass": 3,
+            "n": 4
           },
           "consistent": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "damage": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "traceable": {
             "pass": 0,
-            "n": 2
+            "n": 4
           },
           "distant": {
-            "pass": 2,
-            "n": 2
+            "pass": 3,
+            "n": 4
           },
           "n_incorrect_from_also_fixing": 0,
-          "mean_cost_usd": 0.355,
-          "total_cost_usd": 0.71,
-          "mean_minutes": 1.417,
-          "mean_turns": 9.5
+          "mean_cost_usd": 0.35,
+          "total_cost_usd": 1.4,
+          "mean_minutes": 1.525,
+          "mean_turns": 9.75
         },
         "fix-merge": {
           "n": 2,
@@ -1880,32 +2654,32 @@
           "mean_turns": 10.5
         },
         "stale-clone": {
-          "n": 2,
+          "n": 4,
           "n_all_pass": 0,
           "correct": {
-            "pass": 0,
-            "n": 2
+            "pass": 1,
+            "n": 4
           },
           "consistent": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "damage": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "traceable": {
             "pass": 0,
-            "n": 2
+            "n": 4
           },
           "distant": {
             "pass": 0,
             "n": 0
           },
-          "n_incorrect_from_also_fixing": 2,
-          "mean_cost_usd": 0.399,
-          "total_cost_usd": 0.8,
-          "mean_minutes": 1.55,
+          "n_incorrect_from_also_fixing": 3,
+          "mean_cost_usd": 0.38,
+          "total_cost_usd": 1.52,
+          "mean_minutes": 1.579,
           "mean_turns": 11.5
         },
         "undo": {
@@ -1941,40 +2715,40 @@
     },
     "make": {
       "all": {
-        "n": 18,
-        "n_all_pass": 18,
+        "n": 26,
+        "n_all_pass": 25,
         "correct": {
-          "pass": 18,
-          "n": 18
+          "pass": 25,
+          "n": 26
         },
         "consistent": {
-          "pass": 14,
-          "n": 14
+          "pass": 22,
+          "n": 22
         },
         "damage": {
-          "pass": 18,
-          "n": 18
+          "pass": 26,
+          "n": 26
         },
         "traceable": {
-          "pass": 14,
-          "n": 14
+          "pass": 22,
+          "n": 22
         },
         "distant": {
-          "pass": 4,
-          "n": 4
+          "pass": 8,
+          "n": 10
         },
-        "n_incorrect_from_also_fixing": 0,
-        "mean_cost_usd": 0.282,
-        "total_cost_usd": 5.07,
-        "mean_minutes": 1.233,
-        "mean_turns": 8.0
+        "n_incorrect_from_also_fixing": 1,
+        "mean_cost_usd": 0.293,
+        "total_cost_usd": 7.62,
+        "mean_minutes": 1.327,
+        "mean_turns": 8.308
       },
       "tasks": {
-        "data-correction": {
+        "add-site": {
           "n": 2,
-          "n_all_pass": 2,
+          "n_all_pass": 1,
           "correct": {
-            "pass": 2,
+            "pass": 1,
             "n": 2
           },
           "consistent": {
@@ -1991,32 +2765,32 @@
           },
           "distant": {
             "pass": 0,
-            "n": 0
-          },
-          "n_incorrect_from_also_fixing": 0,
-          "mean_cost_usd": 0.24,
-          "total_cost_usd": 0.48,
-          "mean_minutes": 1.067,
-          "mean_turns": 6.5
-        },
-        "distant-consumer": {
-          "n": 2,
-          "n_all_pass": 2,
-          "correct": {
-            "pass": 2,
             "n": 2
+          },
+          "n_incorrect_from_also_fixing": 1,
+          "mean_cost_usd": 0.48,
+          "total_cost_usd": 0.96,
+          "mean_minutes": 2.067,
+          "mean_turns": 13.0
+        },
+        "data-correction": {
+          "n": 4,
+          "n_all_pass": 4,
+          "correct": {
+            "pass": 4,
+            "n": 4
           },
           "consistent": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "damage": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "traceable": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "distant": {
             "pass": 2,
@@ -2024,9 +2798,38 @@
           },
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.273,
-          "total_cost_usd": 0.55,
-          "mean_minutes": 1.25,
-          "mean_turns": 8.5
+          "total_cost_usd": 1.09,
+          "mean_minutes": 1.312,
+          "mean_turns": 8.0
+        },
+        "distant-consumer": {
+          "n": 4,
+          "n_all_pass": 4,
+          "correct": {
+            "pass": 4,
+            "n": 4
+          },
+          "consistent": {
+            "pass": 4,
+            "n": 4
+          },
+          "damage": {
+            "pass": 4,
+            "n": 4
+          },
+          "traceable": {
+            "pass": 4,
+            "n": 4
+          },
+          "distant": {
+            "pass": 4,
+            "n": 4
+          },
+          "n_incorrect_from_also_fixing": 0,
+          "mean_cost_usd": 0.284,
+          "total_cost_usd": 1.13,
+          "mean_minutes": 1.404,
+          "mean_turns": 8.25
         },
         "filter": {
           "n": 2,
@@ -2174,33 +2977,33 @@
           "mean_turns": 11.0
         },
         "stale-clone": {
-          "n": 2,
-          "n_all_pass": 2,
+          "n": 4,
+          "n_all_pass": 4,
           "correct": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "consistent": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "damage": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "traceable": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "distant": {
             "pass": 0,
             "n": 0
           },
           "n_incorrect_from_also_fixing": 0,
-          "mean_cost_usd": 0.192,
-          "total_cost_usd": 0.38,
-          "mean_minutes": 0.9,
-          "mean_turns": 6.0
+          "mean_cost_usd": 0.193,
+          "total_cost_usd": 0.77,
+          "mean_minutes": 0.933,
+          "mean_turns": 5.75
         },
         "undo": {
           "n": 2,
@@ -2233,37 +3036,66 @@
         }
       }
     },
-    "calkit": {
+    "make-hint": {
       "all": {
-        "n": 18,
-        "n_all_pass": 18,
+        "n": 8,
+        "n_all_pass": 3,
         "correct": {
-          "pass": 18,
-          "n": 18
+          "pass": 3,
+          "n": 8
         },
         "consistent": {
-          "pass": 14,
-          "n": 14
+          "pass": 8,
+          "n": 8
         },
         "damage": {
-          "pass": 18,
-          "n": 18
+          "pass": 8,
+          "n": 8
         },
         "traceable": {
-          "pass": 14,
-          "n": 14
+          "pass": 8,
+          "n": 8
         },
         "distant": {
-          "pass": 4,
-          "n": 4
+          "pass": 2,
+          "n": 6
         },
-        "n_incorrect_from_also_fixing": 0,
-        "mean_cost_usd": 0.396,
-        "total_cost_usd": 7.13,
-        "mean_minutes": 1.449,
-        "mean_turns": 10.778
+        "n_incorrect_from_also_fixing": 4,
+        "mean_cost_usd": 0.377,
+        "total_cost_usd": 3.01,
+        "mean_minutes": 1.815,
+        "mean_turns": 10.625
       },
       "tasks": {
+        "add-site": {
+          "n": 2,
+          "n_all_pass": 0,
+          "correct": {
+            "pass": 0,
+            "n": 2
+          },
+          "consistent": {
+            "pass": 2,
+            "n": 2
+          },
+          "damage": {
+            "pass": 2,
+            "n": 2
+          },
+          "traceable": {
+            "pass": 2,
+            "n": 2
+          },
+          "distant": {
+            "pass": 0,
+            "n": 2
+          },
+          "n_incorrect_from_also_fixing": 2,
+          "mean_cost_usd": 0.525,
+          "total_cost_usd": 1.05,
+          "mean_minutes": 2.417,
+          "mean_turns": 15.0
+        },
         "data-correction": {
           "n": 2,
           "n_all_pass": 2,
@@ -2284,20 +3116,20 @@
             "n": 2
           },
           "distant": {
-            "pass": 0,
-            "n": 0
+            "pass": 2,
+            "n": 2
           },
           "n_incorrect_from_also_fixing": 0,
-          "mean_cost_usd": 0.364,
-          "total_cost_usd": 0.73,
-          "mean_minutes": 1.367,
-          "mean_turns": 10.0
+          "mean_cost_usd": 0.347,
+          "total_cost_usd": 0.69,
+          "mean_minutes": 1.617,
+          "mean_turns": 9.5
         },
         "distant-consumer": {
           "n": 2,
-          "n_all_pass": 2,
+          "n_all_pass": 0,
           "correct": {
-            "pass": 2,
+            "pass": 0,
             "n": 2
           },
           "consistent": {
@@ -2313,14 +3145,163 @@
             "n": 2
           },
           "distant": {
+            "pass": 0,
+            "n": 2
+          },
+          "n_incorrect_from_also_fixing": 1,
+          "mean_cost_usd": 0.34,
+          "total_cost_usd": 0.68,
+          "mean_minutes": 1.683,
+          "mean_turns": 9.5
+        },
+        "stale-clone": {
+          "n": 2,
+          "n_all_pass": 1,
+          "correct": {
+            "pass": 1,
+            "n": 2
+          },
+          "consistent": {
+            "pass": 2,
+            "n": 2
+          },
+          "damage": {
+            "pass": 2,
+            "n": 2
+          },
+          "traceable": {
+            "pass": 2,
+            "n": 2
+          },
+          "distant": {
+            "pass": 0,
+            "n": 0
+          },
+          "n_incorrect_from_also_fixing": 1,
+          "mean_cost_usd": 0.295,
+          "total_cost_usd": 0.59,
+          "mean_minutes": 1.542,
+          "mean_turns": 8.5
+        }
+      }
+    },
+    "calkit": {
+      "all": {
+        "n": 26,
+        "n_all_pass": 24,
+        "correct": {
+          "pass": 24,
+          "n": 26
+        },
+        "consistent": {
+          "pass": 22,
+          "n": 22
+        },
+        "damage": {
+          "pass": 26,
+          "n": 26
+        },
+        "traceable": {
+          "pass": 22,
+          "n": 22
+        },
+        "distant": {
+          "pass": 8,
+          "n": 10
+        },
+        "n_incorrect_from_also_fixing": 2,
+        "mean_cost_usd": 0.413,
+        "total_cost_usd": 10.75,
+        "mean_minutes": 1.607,
+        "mean_turns": 11.269
+      },
+      "tasks": {
+        "add-site": {
+          "n": 2,
+          "n_all_pass": 0,
+          "correct": {
+            "pass": 0,
+            "n": 2
+          },
+          "consistent": {
+            "pass": 2,
+            "n": 2
+          },
+          "damage": {
+            "pass": 2,
+            "n": 2
+          },
+          "traceable": {
+            "pass": 2,
+            "n": 2
+          },
+          "distant": {
+            "pass": 0,
+            "n": 2
+          },
+          "n_incorrect_from_also_fixing": 2,
+          "mean_cost_usd": 0.744,
+          "total_cost_usd": 1.49,
+          "mean_minutes": 3.342,
+          "mean_turns": 19.5
+        },
+        "data-correction": {
+          "n": 4,
+          "n_all_pass": 4,
+          "correct": {
+            "pass": 4,
+            "n": 4
+          },
+          "consistent": {
+            "pass": 4,
+            "n": 4
+          },
+          "damage": {
+            "pass": 4,
+            "n": 4
+          },
+          "traceable": {
+            "pass": 4,
+            "n": 4
+          },
+          "distant": {
             "pass": 2,
             "n": 2
           },
           "n_incorrect_from_also_fixing": 0,
-          "mean_cost_usd": 0.394,
-          "total_cost_usd": 0.79,
-          "mean_minutes": 1.492,
-          "mean_turns": 11.0
+          "mean_cost_usd": 0.374,
+          "total_cost_usd": 1.5,
+          "mean_minutes": 1.504,
+          "mean_turns": 10.75
+        },
+        "distant-consumer": {
+          "n": 4,
+          "n_all_pass": 4,
+          "correct": {
+            "pass": 4,
+            "n": 4
+          },
+          "consistent": {
+            "pass": 4,
+            "n": 4
+          },
+          "damage": {
+            "pass": 4,
+            "n": 4
+          },
+          "traceable": {
+            "pass": 4,
+            "n": 4
+          },
+          "distant": {
+            "pass": 4,
+            "n": 4
+          },
+          "n_incorrect_from_also_fixing": 0,
+          "mean_cost_usd": 0.395,
+          "total_cost_usd": 1.58,
+          "mean_minutes": 1.562,
+          "mean_turns": 10.5
         },
         "filter": {
           "n": 2,
@@ -2468,33 +3449,33 @@
           "mean_turns": 11.5
         },
         "stale-clone": {
-          "n": 2,
-          "n_all_pass": 2,
+          "n": 4,
+          "n_all_pass": 4,
           "correct": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "consistent": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "damage": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "traceable": {
-            "pass": 2,
-            "n": 2
+            "pass": 4,
+            "n": 4
           },
           "distant": {
             "pass": 0,
             "n": 0
           },
           "n_incorrect_from_also_fixing": 0,
-          "mean_cost_usd": 0.335,
-          "total_cost_usd": 0.67,
-          "mean_minutes": 1.15,
-          "mean_turns": 10.5
+          "mean_cost_usd": 0.311,
+          "total_cost_usd": 1.25,
+          "mean_minutes": 1.192,
+          "mean_turns": 9.5
         },
         "undo": {
           "n": 2,
@@ -2524,6 +3505,155 @@
           "total_cost_usd": 0.68,
           "mean_minutes": 1.275,
           "mean_turns": 9.5
+        }
+      }
+    },
+    "calkit-hint": {
+      "all": {
+        "n": 8,
+        "n_all_pass": 5,
+        "correct": {
+          "pass": 5,
+          "n": 8
+        },
+        "consistent": {
+          "pass": 8,
+          "n": 8
+        },
+        "damage": {
+          "pass": 8,
+          "n": 8
+        },
+        "traceable": {
+          "pass": 8,
+          "n": 8
+        },
+        "distant": {
+          "pass": 4,
+          "n": 6
+        },
+        "n_incorrect_from_also_fixing": 3,
+        "mean_cost_usd": 0.46,
+        "total_cost_usd": 3.68,
+        "mean_minutes": 1.975,
+        "mean_turns": 13.5
+      },
+      "tasks": {
+        "add-site": {
+          "n": 2,
+          "n_all_pass": 1,
+          "correct": {
+            "pass": 1,
+            "n": 2
+          },
+          "consistent": {
+            "pass": 2,
+            "n": 2
+          },
+          "damage": {
+            "pass": 2,
+            "n": 2
+          },
+          "traceable": {
+            "pass": 2,
+            "n": 2
+          },
+          "distant": {
+            "pass": 0,
+            "n": 2
+          },
+          "n_incorrect_from_also_fixing": 1,
+          "mean_cost_usd": 0.65,
+          "total_cost_usd": 1.3,
+          "mean_minutes": 2.767,
+          "mean_turns": 18.0
+        },
+        "data-correction": {
+          "n": 2,
+          "n_all_pass": 2,
+          "correct": {
+            "pass": 2,
+            "n": 2
+          },
+          "consistent": {
+            "pass": 2,
+            "n": 2
+          },
+          "damage": {
+            "pass": 2,
+            "n": 2
+          },
+          "traceable": {
+            "pass": 2,
+            "n": 2
+          },
+          "distant": {
+            "pass": 2,
+            "n": 2
+          },
+          "n_incorrect_from_also_fixing": 0,
+          "mean_cost_usd": 0.352,
+          "total_cost_usd": 0.7,
+          "mean_minutes": 1.45,
+          "mean_turns": 9.5
+        },
+        "distant-consumer": {
+          "n": 2,
+          "n_all_pass": 2,
+          "correct": {
+            "pass": 2,
+            "n": 2
+          },
+          "consistent": {
+            "pass": 2,
+            "n": 2
+          },
+          "damage": {
+            "pass": 2,
+            "n": 2
+          },
+          "traceable": {
+            "pass": 2,
+            "n": 2
+          },
+          "distant": {
+            "pass": 2,
+            "n": 2
+          },
+          "n_incorrect_from_also_fixing": 0,
+          "mean_cost_usd": 0.403,
+          "total_cost_usd": 0.81,
+          "mean_minutes": 1.8,
+          "mean_turns": 11.5
+        },
+        "stale-clone": {
+          "n": 2,
+          "n_all_pass": 0,
+          "correct": {
+            "pass": 0,
+            "n": 2
+          },
+          "consistent": {
+            "pass": 2,
+            "n": 2
+          },
+          "damage": {
+            "pass": 2,
+            "n": 2
+          },
+          "traceable": {
+            "pass": 2,
+            "n": 2
+          },
+          "distant": {
+            "pass": 0,
+            "n": 0
+          },
+          "n_incorrect_from_also_fixing": 2,
+          "mean_cost_usd": 0.432,
+          "total_cost_usd": 0.86,
+          "mean_minutes": 1.883,
+          "mean_turns": 15.0
         }
       }
     }
@@ -2584,16 +3714,20 @@
         }
       },
       "messy-git": {
-        "noticed": 5,
-        "n": 12,
+        "noticed": 8,
+        "n": 20,
         "tasks": {
+          "add-site": {
+            "noticed": 2,
+            "n": 2
+          },
           "data-correction": {
             "noticed": 0,
-            "n": 2
+            "n": 4
           },
           "distant-consumer": {
             "noticed": 0,
-            "n": 2
+            "n": 4
           },
           "provenance": {
             "noticed": 2,
@@ -2604,8 +3738,8 @@
             "n": 2
           },
           "stale-clone": {
-            "noticed": 2,
-            "n": 2
+            "noticed": 3,
+            "n": 4
           },
           "undo": {
             "noticed": 0,
@@ -2613,21 +3747,25 @@
           }
         },
         "site_e": {
-          "noticed": 0,
-          "n": 0
+          "noticed": 2,
+          "n": 2
         }
       },
       "make": {
-        "noticed": 0,
-        "n": 16,
+        "noticed": 2,
+        "n": 24,
         "tasks": {
+          "add-site": {
+            "noticed": 2,
+            "n": 2
+          },
           "data-correction": {
             "noticed": 0,
-            "n": 2
+            "n": 4
           },
           "distant-consumer": {
             "noticed": 0,
-            "n": 2
+            "n": 4
           },
           "filter": {
             "noticed": 0,
@@ -2647,7 +3785,7 @@
           },
           "stale-clone": {
             "noticed": 0,
-            "n": 2
+            "n": 4
           },
           "undo": {
             "noticed": 0,
@@ -2655,21 +3793,51 @@
           }
         },
         "site_e": {
-          "noticed": 0,
-          "n": 0
+          "noticed": 2,
+          "n": 2
+        }
+      },
+      "make-hint": {
+        "noticed": 8,
+        "n": 8,
+        "tasks": {
+          "add-site": {
+            "noticed": 2,
+            "n": 2
+          },
+          "data-correction": {
+            "noticed": 2,
+            "n": 2
+          },
+          "distant-consumer": {
+            "noticed": 2,
+            "n": 2
+          },
+          "stale-clone": {
+            "noticed": 2,
+            "n": 2
+          }
+        },
+        "site_e": {
+          "noticed": 1,
+          "n": 2
         }
       },
       "calkit": {
-        "noticed": 0,
-        "n": 16,
+        "noticed": 2,
+        "n": 24,
         "tasks": {
+          "add-site": {
+            "noticed": 2,
+            "n": 2
+          },
           "data-correction": {
             "noticed": 0,
-            "n": 2
+            "n": 4
           },
           "distant-consumer": {
             "noticed": 0,
-            "n": 2
+            "n": 4
           },
           "filter": {
             "noticed": 0,
@@ -2689,7 +3857,7 @@
           },
           "stale-clone": {
             "noticed": 0,
-            "n": 2
+            "n": 4
           },
           "undo": {
             "noticed": 0,
@@ -2697,20 +3865,46 @@
           }
         },
         "site_e": {
-          "noticed": 0,
-          "n": 0
+          "noticed": 1,
+          "n": 2
+        }
+      },
+      "calkit-hint": {
+        "noticed": 6,
+        "n": 8,
+        "tasks": {
+          "add-site": {
+            "noticed": 2,
+            "n": 2
+          },
+          "data-correction": {
+            "noticed": 0,
+            "n": 2
+          },
+          "distant-consumer": {
+            "noticed": 2,
+            "n": 2
+          },
+          "stale-clone": {
+            "noticed": 2,
+            "n": 2
+          }
+        },
+        "site_e": {
+          "noticed": 2,
+          "n": 2
         }
       }
     },
     "messy": {
-      "noticed": 9,
-      "n": 22
+      "noticed": 12,
+      "n": 30
     },
     "rest": {
-      "noticed": 0,
-      "n": 38
+      "noticed": 4,
+      "n": 54
     },
-    "fisher_p_one_sided": 3.3647784604413746e-05,
+    "fisher_p_one_sided": 0.0004781594135969477,
     "site_e_pattern": "[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\\b|[Rr]e-?entr(?:y|ies)\\b|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)",
     "runs": {
       "messy-git__provenance__20261127-215415-517060": [
@@ -2765,114 +3959,298 @@
         "D-009",
         "D-9",
         "Site D"
+      ],
+      "calkit-hint__add-site__1": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero"
+      ],
+      "calkit-hint__add-site__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "calkit-hint__distant-consumer__1": [
+        "D-001",
+        "D-9",
+        "Site D",
+        "site D"
+      ],
+      "calkit-hint__distant-consumer__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "calkit-hint__stale-clone__1": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "calkit-hint__stale-clone__2": [
+        "D-007",
+        "D-7",
+        "Site D",
+        "leading zero"
+      ],
+      "calkit__add-site__1": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D"
+      ],
+      "calkit__add-site__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "make-hint__add-site__1": [
+        "D-001",
+        "D-1",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "make-hint__add-site__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D"
+      ],
+      "make-hint__data-correction__1": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "make-hint__data-correction__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "make-hint__distant-consumer__1": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "make-hint__distant-consumer__2": [
+        "D-009",
+        "D-9",
+        "site D",
+        "zero-pad"
+      ],
+      "make-hint__stale-clone__1": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "make-hint__stale-clone__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D",
+        "zero-pad"
+      ],
+      "make__add-site__1": [
+        "D-009",
+        "D-9",
+        "site D",
+        "zero-pad"
+      ],
+      "make__add-site__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "messy-git__add-site__1": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "messy-git__add-site__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "messy-git__stale-clone__2": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero"
       ]
     },
-    "runs_site_e": {},
+    "runs_site_e": {
+      "calkit-hint__add-site__1": [
+        "most recent record",
+        "re-entered"
+      ],
+      "calkit-hint__add-site__2": [
+        "Duplicat",
+        "duplicat",
+        "latest entry",
+        "re-entered"
+      ],
+      "calkit__add-site__1": [
+        "latest entry",
+        "re-entered"
+      ],
+      "make-hint__add-site__2": [
+        "duplicat",
+        "re-entered"
+      ],
+      "make__add-site__1": [
+        "latest entry",
+        "re-entered"
+      ],
+      "make__add-site__2": [
+        "duplicat"
+      ],
+      "messy-git__add-site__1": [
+        "re-entered"
+      ],
+      "messy-git__add-site__2": [
+        "re-entered"
+      ]
+    },
     "interventions": {
-      "batches": [],
+      "batches": [
+        "batch-3"
+      ],
       "arms": {
         "messy-git": {
-          "n": 0,
+          "n": 8,
           "n_loaded_conventions": 0,
-          "n_named_readme": 0,
+          "n_named_readme": 7,
           "site_d": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 3,
+            "n": 8
           },
           "site_e": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 2,
+            "n": 2
           },
           "add_site_correct": {
-            "pass": 0,
-            "n": 0
+            "pass": 1,
+            "n": 2
           },
-          "site_e_handling": {}
+          "site_e_handling": {
+            "correct": 2
+          }
         },
         "make": {
-          "n": 0,
+          "n": 8,
           "n_loaded_conventions": 0,
-          "n_named_readme": 0,
+          "n_named_readme": 3,
           "site_d": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 2,
+            "n": 8
           },
           "site_e": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 2,
+            "n": 2
           },
           "add_site_correct": {
-            "pass": 0,
-            "n": 0
+            "pass": 1,
+            "n": 2
           },
-          "site_e_handling": {}
+          "site_e_handling": {
+            "correct": 2
+          }
         },
         "make-hint": {
-          "n": 0,
+          "n": 8,
           "n_loaded_conventions": 0,
-          "n_named_readme": 0,
+          "n_named_readme": 4,
           "site_d": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 8,
+            "n": 8
           },
           "site_e": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 1,
+            "n": 2
           },
           "add_site_correct": {
             "pass": 0,
-            "n": 0
+            "n": 2
           },
-          "site_e_handling": {}
+          "site_e_handling": {
+            "correct": 2
+          }
         },
         "calkit": {
-          "n": 0,
-          "n_loaded_conventions": 0,
-          "n_named_readme": 0,
+          "n": 8,
+          "n_loaded_conventions": 8,
+          "n_named_readme": 7,
           "site_d": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 2,
+            "n": 8
           },
           "site_e": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 1,
+            "n": 2
           },
           "add_site_correct": {
             "pass": 0,
-            "n": 0
+            "n": 2
           },
-          "site_e_handling": {}
+          "site_e_handling": {
+            "correct": 2
+          }
         },
         "calkit-hint": {
-          "n": 0,
-          "n_loaded_conventions": 0,
-          "n_named_readme": 0,
+          "n": 8,
+          "n_loaded_conventions": 8,
+          "n_named_readme": 6,
           "site_d": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 6,
+            "n": 8
           },
           "site_e": {
-            "noticed": 0,
-            "n": 0
+            "noticed": 2,
+            "n": 2
           },
           "add_site_correct": {
-            "pass": 0,
-            "n": 0
+            "pass": 1,
+            "n": 2
           },
-          "site_e_handling": {}
+          "site_e_handling": {
+            "correct": 2
+          }
         }
       },
       "tests": {
         "hint_vs_calkit": {
           "vs": "calkit",
           "alternative": "greater",
-          "site_d_p": 1.0,
-          "site_e_p": 1.0
+          "site_d_p": 0.06596736596736597,
+          "site_e_p": 0.5
         },
         "hint_vs_make_hint": {
           "vs": "make-hint",
           "alternative": "two-sided",
-          "site_d_p": 1.0,
+          "site_d_p": 0.4666666666666667,
           "site_e_p": 1.0
         }
       }
@@ -2880,7 +4258,7 @@
   },
   "isolation": {
     "n_benchmark_access": 0,
-    "n_outside_paths": 28,
+    "n_outside_paths": 45,
     "runs": {
       "calkit__fix-merge__20261127-202553-512427": {
         "benchmark_access": [],
@@ -3082,6 +4460,125 @@
           "/tmp/bak_undo/",
           "/tmp/bak_undo/paper/draft.md"
         ]
+      },
+      "calkit-hint__add-site__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/patch.py",
+          "/tmp/patch2.py"
+        ]
+      },
+      "calkit-hint__add-site__2": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/x.json"
+        ]
+      },
+      "calkit-hint__stale-clone__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old-ancova.json"
+        ]
+      },
+      "calkit-hint__stale-clone__2": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/oldres",
+          "/tmp/oldres/",
+          "/tmp/oldres/report.md"
+        ]
+      },
+      "calkit__data-correction__2": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old-ancova.json",
+          "/tmp/old-change.json"
+        ]
+      },
+      "calkit__stale-clone__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old_report.md"
+        ]
+      },
+      "make-hint__add-site__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/r.md"
+        ]
+      },
+      "make-hint__data-correction__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/dcheck",
+          "/tmp/dcheck/a.csv",
+          "/tmp/dcheck/m.json",
+          "/tmp/dcheck/sessions.csv",
+          "/tmp/old_analysis.csv",
+          "/tmp/old_ancova.json",
+          "/tmp/old_change.json",
+          "/tmp/old_{m}.json"
+        ]
+      },
+      "make-hint__data-correction__2": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old_analysis.csv",
+          "/tmp/old_change.json"
+        ]
+      },
+      "make-hint__distant-consumer__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old_ancova.json"
+        ]
+      },
+      "make-hint__stale-clone__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old_report.md"
+        ]
+      },
+      "make-hint__stale-clone__2": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/dcheck",
+          "/tmp/dcheck/a.csv",
+          "/tmp/dcheck/m.json",
+          "/tmp/dcheck/sessions_fixed.csv",
+          "/tmp/old_analysis.csv"
+        ]
+      },
+      "make__data-correction__2": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/report_old.md"
+        ]
+      },
+      "make__stale-clone__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old_report.md"
+        ]
+      },
+      "make__stale-clone__2": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old_report.md"
+        ]
+      },
+      "messy-git__add-site__1": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old_merged.csv"
+        ]
+      },
+      "messy-git__stale-clone__2": {
+        "benchmark_access": [],
+        "outside_paths": [
+          "/tmp/old_ancova.json",
+          "/tmp/old_merged_final.csv"
+        ]
       }
     }
   },
@@ -3166,7 +4663,48 @@
         "files_differing": []
       }
     },
-    "batch-3": {}
+    "batch-3": {
+      "calkit": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      },
+      "stale/calkit": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      },
+      "make-hint": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      },
+      "stale/make-hint": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      },
+      "make": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      },
+      "stale/make": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      },
+      "messy-git": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      },
+      "stale/messy-git": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    }
   },
   "runs": [
     {
@@ -5668,6 +7206,1463 @@
       "named_readme": true,
       "template": {
         "no_git": true,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit-hint__add-site__1",
+      "arm": "calkit-hint",
+      "task": "add-site",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 2,
+      "n_wrong": 15,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.6332841999999999,
+      "minutes": 2.716666666666667,
+      "turns": 18,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero"
+      ],
+      "noticed_site_e": true,
+      "notice_site_e_matches": [
+        "most recent record",
+        "re-entered"
+      ],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/patch.py",
+        "/tmp/patch2.py"
+      ],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit-hint__add-site__2",
+      "arm": "calkit-hint",
+      "task": "add-site",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.6671738,
+      "minutes": 2.816666666666667,
+      "turns": 18,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": true,
+      "notice_site_e_matches": [
+        "Duplicat",
+        "duplicat",
+        "latest entry",
+        "re-entered"
+      ],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/x.json"
+      ],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit-hint__data-correction__1",
+      "arm": "calkit-hint",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.3600384000000001,
+      "minutes": 1.4833333333333334,
+      "turns": 10,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit-hint__data-correction__2",
+      "arm": "calkit-hint",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.3447773999999999,
+      "minutes": 1.4166666666666667,
+      "turns": 9,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit-hint__distant-consumer__1",
+      "arm": "calkit-hint",
+      "task": "distant-consumer",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.43459619999999993,
+      "minutes": 1.8333333333333333,
+      "turns": 13,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-001",
+        "D-9",
+        "Site D",
+        "site D"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit-hint__distant-consumer__2",
+      "arm": "calkit-hint",
+      "task": "distant-consumer",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.37187899999999996,
+      "minutes": 1.7666666666666666,
+      "turns": 10,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit-hint__stale-clone__1",
+      "arm": "calkit-hint",
+      "task": "stale-clone",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 20,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.42965180000000003,
+      "minutes": 1.8,
+      "turns": 14,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old-ancova.json"
+      ],
+      "loaded_conventions": true,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit-hint__stale-clone__2",
+      "arm": "calkit-hint",
+      "task": "stale-clone",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 20,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.43518799999999996,
+      "minutes": 1.9666666666666666,
+      "turns": 16,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-007",
+        "D-7",
+        "Site D",
+        "leading zero"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/oldres",
+        "/tmp/oldres/",
+        "/tmp/oldres/report.md"
+      ],
+      "loaded_conventions": true,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit__add-site__1",
+      "arm": "calkit",
+      "task": "add-site",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 2,
+      "n_wrong": 15,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.7195043999999999,
+      "minutes": 3.1,
+      "turns": 19,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D"
+      ],
+      "noticed_site_e": true,
+      "notice_site_e_matches": [
+        "latest entry",
+        "re-entered"
+      ],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit__add-site__2",
+      "arm": "calkit",
+      "task": "add-site",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 2,
+      "n_wrong": 15,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.7684698000000001,
+      "minutes": 3.5833333333333335,
+      "turns": 20,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "noticed_site_e": false,
+      "notice_site_e_matches": [],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit__data-correction__1",
+      "arm": "calkit",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.3486112,
+      "minutes": 1.5,
+      "turns": 10,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit__data-correction__2",
+      "arm": "calkit",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.42017740000000003,
+      "minutes": 1.7833333333333334,
+      "turns": 13,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old-ancova.json",
+        "/tmp/old-change.json"
+      ],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit__distant-consumer__1",
+      "arm": "calkit",
+      "task": "distant-consumer",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.37894039999999996,
+      "minutes": 1.6166666666666667,
+      "turns": 10,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit__distant-consumer__2",
+      "arm": "calkit",
+      "task": "distant-consumer",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.4134352,
+      "minutes": 1.65,
+      "turns": 10,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit__stale-clone__1",
+      "arm": "calkit",
+      "task": "stale-clone",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.2810726,
+      "minutes": 1.15,
+      "turns": 8,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old_report.md"
+      ],
+      "loaded_conventions": true,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "calkit__stale-clone__2",
+      "arm": "calkit",
+      "task": "stale-clone",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.2933934000000001,
+      "minutes": 1.3166666666666667,
+      "turns": 9,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": true,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make-hint__add-site__1",
+      "arm": "make-hint",
+      "task": "add-site",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 2,
+      "n_wrong": 15,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.5189404,
+      "minutes": 2.3833333333333333,
+      "turns": 14,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-001",
+        "D-1",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "noticed_site_e": false,
+      "notice_site_e_matches": [],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/r.md"
+      ],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make-hint__add-site__2",
+      "arm": "make-hint",
+      "task": "add-site",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 2,
+      "n_wrong": 15,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.5302162,
+      "minutes": 2.45,
+      "turns": 16,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D"
+      ],
+      "noticed_site_e": true,
+      "notice_site_e_matches": [
+        "duplicat",
+        "re-entered"
+      ],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make-hint__data-correction__1",
+      "arm": "make-hint",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.34230659999999996,
+      "minutes": 1.6666666666666667,
+      "turns": 11,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/dcheck",
+        "/tmp/dcheck/a.csv",
+        "/tmp/dcheck/m.json",
+        "/tmp/dcheck/sessions.csv",
+        "/tmp/old_analysis.csv",
+        "/tmp/old_ancova.json",
+        "/tmp/old_change.json",
+        "/tmp/old_{m}.json"
+      ],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make-hint__data-correction__2",
+      "arm": "make-hint",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.35117099999999996,
+      "minutes": 1.5666666666666667,
+      "turns": 8,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old_analysis.csv",
+        "/tmp/old_change.json"
+      ],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make-hint__distant-consumer__1",
+      "arm": "make-hint",
+      "task": "distant-consumer",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 1,
+      "n_wrong": 19,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.37089300000000003,
+      "minutes": 1.8166666666666667,
+      "turns": 8,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old_ancova.json"
+      ],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make-hint__distant-consumer__2",
+      "arm": "make-hint",
+      "task": "distant-consumer",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.30920159999999997,
+      "minutes": 1.55,
+      "turns": 11,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make-hint__stale-clone__1",
+      "arm": "make-hint",
+      "task": "stale-clone",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 20,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.3131198,
+      "minutes": 1.6166666666666667,
+      "turns": 10,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old_report.md"
+      ],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make-hint__stale-clone__2",
+      "arm": "make-hint",
+      "task": "stale-clone",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.27698920000000005,
+      "minutes": 1.4666666666666666,
+      "turns": 7,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/dcheck",
+        "/tmp/dcheck/a.csv",
+        "/tmp/dcheck/m.json",
+        "/tmp/dcheck/sessions_fixed.csv",
+        "/tmp/old_analysis.csv"
+      ],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make__add-site__1",
+      "arm": "make",
+      "task": "add-site",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.43855539999999993,
+      "minutes": 1.8666666666666667,
+      "turns": 11,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": true,
+      "notice_site_e_matches": [
+        "latest entry",
+        "re-entered"
+      ],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make__add-site__2",
+      "arm": "make",
+      "task": "add-site",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": false,
+      "n_stale": 2,
+      "n_wrong": 15,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.5206604000000001,
+      "minutes": 2.2666666666666666,
+      "turns": 15,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "noticed_site_e": true,
+      "notice_site_e_matches": [
+        "duplicat"
+      ],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make__data-correction__1",
+      "arm": "make",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.32245280000000004,
+      "minutes": 1.6333333333333333,
+      "turns": 10,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make__data-correction__2",
+      "arm": "make",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.28926280000000004,
+      "minutes": 1.4833333333333334,
+      "turns": 9,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/report_old.md"
+      ],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make__distant-consumer__1",
+      "arm": "make",
+      "task": "distant-consumer",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.2663986,
+      "minutes": 1.4333333333333333,
+      "turns": 7,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make__distant-consumer__2",
+      "arm": "make",
+      "task": "distant-consumer",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.3222358,
+      "minutes": 1.6833333333333333,
+      "turns": 9,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make__stale-clone__1",
+      "arm": "make",
+      "task": "stale-clone",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.17883079999999998,
+      "minutes": 0.9166666666666666,
+      "turns": 5,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old_report.md"
+      ],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "make__stale-clone__2",
+      "arm": "make",
+      "task": "stale-clone",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": true,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.20992820000000004,
+      "minutes": 1.0166666666666666,
+      "turns": 6,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old_report.md"
+      ],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "messy-git__add-site__1",
+      "arm": "messy-git",
+      "task": "add-site",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": false,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.5931718000000001,
+      "minutes": 2.45,
+      "turns": 15,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "site D",
+        "zero-pad"
+      ],
+      "noticed_site_e": true,
+      "notice_site_e_matches": [
+        "re-entered"
+      ],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old_merged.csv"
+      ],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "messy-git__add-site__2",
+      "arm": "messy-git",
+      "task": "add-site",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": false,
+      "distant": false,
+      "n_stale": 2,
+      "n_wrong": 15,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.6085064,
+      "minutes": 2.466666666666667,
+      "turns": 15,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero",
+        "site D"
+      ],
+      "noticed_site_e": true,
+      "notice_site_e_matches": [
+        "re-entered"
+      ],
+      "site_e": "correct",
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "messy-git__data-correction__1",
+      "arm": "messy-git",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": false,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.4463887999999999,
+      "minutes": 1.9333333333333333,
+      "turns": 12,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": false,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "messy-git__data-correction__2",
+      "arm": "messy-git",
+      "task": "data-correction",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": false,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.402588,
+      "minutes": 1.9166666666666667,
+      "turns": 12,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "messy-git__distant-consumer__1",
+      "arm": "messy-git",
+      "task": "distant-consumer",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": false,
+      "distant": true,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.3308186,
+      "minutes": 1.5833333333333333,
+      "turns": 9,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "messy-git__distant-consumer__2",
+      "arm": "messy-git",
+      "task": "distant-consumer",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": false,
+      "distant": false,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.35881700000000005,
+      "minutes": 1.6833333333333333,
+      "turns": 11,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "messy-git__stale-clone__1",
+      "arm": "messy-git",
+      "task": "stale-clone",
+      "correct": true,
+      "consistent": true,
+      "damage": true,
+      "traceable": false,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 0,
+      "also_fixed": [],
+      "cost_usd": 0.312491,
+      "minutes": 1.3666666666666667,
+      "turns": 9,
+      "noticed_site_d": false,
+      "notice_matches": [],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
+        "same_git_head": true,
+        "files_differing": []
+      }
+    },
+    {
+      "batch": "batch-3",
+      "run": "messy-git__stale-clone__2",
+      "arm": "messy-git",
+      "task": "stale-clone",
+      "correct": false,
+      "consistent": true,
+      "damage": true,
+      "traceable": false,
+      "distant": null,
+      "n_stale": 0,
+      "n_wrong": 20,
+      "also_fixed": [
+        "also-pad-ids"
+      ],
+      "cost_usd": 0.4112188,
+      "minutes": 1.85,
+      "turns": 14,
+      "noticed_site_d": true,
+      "notice_matches": [
+        "D-009",
+        "D-9",
+        "Site D",
+        "leading zero"
+      ],
+      "noticed_site_e": null,
+      "notice_site_e_matches": null,
+      "site_e": null,
+      "benchmark_access": [],
+      "outside_paths": [
+        "/tmp/old_ancova.json",
+        "/tmp/old_merged_final.csv"
+      ],
+      "loaded_conventions": false,
+      "named_readme": true,
+      "template": {
+        "no_git": false,
         "same_git_head": true,
         "files_differing": []
       }

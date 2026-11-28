@@ -1,13 +1,13 @@
 {
   "agent-reliability-batch-3": {
-    "start_time": "2026-11-28T15:13:48.253000",
-    "end_time": "2026-11-28T15:13:48.787000",
+    "start_time": "2026-11-28T16:40:44.920000",
+    "end_time": "2026-11-28T17:00:24.877000",
     "environment": "agent-reliability",
-    "git_rev": "11049df429c6508d596d7b4e54e04c2442822b39",
-    "git_dirty": true,
-    "dvc_lock_hash": "sha256:dcf3ddce4aafcc4a68f893f8ae523810d945b600a959de98971e9d2470fe7135",
-    "calkit_version": "0.53.2.dev26+g11049df42.d20261128",
-    "calkit_git_rev": "11049df429c6508d596d7b4e54e04c2442822b39",
+    "git_rev": "69f4dbc32c0da8ab2e5d35eabaf49d2288c6e835",
+    "git_dirty": false,
+    "dvc_lock_hash": "sha256:4e6aeabee97c662291b867800812f7e0cede3090cf9157624bb2efe1e2e7615d",
+    "calkit_version": "0.53.2.dev32+g69f4dbc32",
+    "calkit_git_rev": "69f4dbc32c0da8ab2e5d35eabaf49d2288c6e835",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
@@ -114,14 +114,14 @@
     }
   },
   "grade-agent-reliability-batch-3": {
-    "start_time": "2026-11-28T16:04:36.152000",
-    "end_time": "2026-11-28T16:04:37.146000",
+    "start_time": "2026-11-28T17:00:45.633000",
+    "end_time": "2026-11-28T17:06:53.589000",
     "environment": "agent-reliability",
-    "git_rev": "f46a6599cecef44f19c6fea2e6cae9fcff3dad7e",
+    "git_rev": "69f4dbc32c0da8ab2e5d35eabaf49d2288c6e835",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:3dfffed275f62671bf5cab60a9b3d8ee092ee7da268a7e41a125203ae69cf097",
-    "calkit_version": "0.53.2.dev30+gf46a6599c.d20261128",
-    "calkit_git_rev": "f46a6599cecef44f19c6fea2e6cae9fcff3dad7e",
+    "dvc_lock_hash": "sha256:e7a6b927ea20a060f03faaa406f0306921bdffb2060eefade3b76e40aba3f575",
+    "calkit_version": "0.53.2.dev32+g69f4dbc32.d20261128",
+    "calkit_git_rev": "69f4dbc32c0da8ab2e5d35eabaf49d2288c6e835",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",
@@ -227,14 +227,14 @@
     }
   },
   "summarize-agent-reliability": {
-    "start_time": "2026-11-28T16:40:20.572000",
-    "end_time": "2026-11-28T16:40:22.366000",
+    "start_time": "2026-11-28T17:06:53.805000",
+    "end_time": "2026-11-28T17:06:56.076000",
     "environment": "agent-reliability",
-    "git_rev": "1ba9bb2771f671eb1fc1ed22c5c5f171e32eb58e",
+    "git_rev": "69f4dbc32c0da8ab2e5d35eabaf49d2288c6e835",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:6acac8bed07ed2097a321517ad5ef64fae87cfc29a42727508f4b70328d5dbc9",
-    "calkit_version": "0.53.2.dev31+g1ba9bb277",
-    "calkit_git_rev": "1ba9bb2771f671eb1fc1ed22c5c5f171e32eb58e",
+    "dvc_lock_hash": "sha256:fbfd15d24ce3060c5cdb8099a900e70c3120479e9cdb0291e68d1640a19dbb02",
+    "calkit_version": "0.53.2.dev32+g69f4dbc32.d20261128",
+    "calkit_git_rev": "69f4dbc32c0da8ab2e5d35eabaf49d2288c6e835",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",

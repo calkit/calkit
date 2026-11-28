@@ -8,9 +8,11 @@ import pytest
 
 import calkit.quarto
 from calkit.markdown import MarkdownParseError
+from calkit.results import VALUE_COMMANDS
 
 
-def test_values(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_values(tmp_path, monkeypatch, command):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "results.json").write_text(
         json.dumps({"rms": 0.123456, "fit": {"n": 401, "coeffs": [1.5, 2]}})
@@ -24,9 +26,14 @@ def test_values(tmp_path, monkeypatch):
             {"cell_type": "raw", "source": "{{< ckvalue results.json rms >}}"},
         ]
     }
-    (tmp_path / "doc.ipynb").write_text(json.dumps(nb))
+    (tmp_path / "doc.ipynb").write_text(
+        json.dumps(nb).replace("ckvalue", command)
+    )
     text = calkit.quarto.read_document_text("doc.ipynb")
-    assert text == "The RMS is\n{{< \n{{< ckvalue results.json rms >}}"
+    assert text == (
+        "The RMS is\n{{< \n{{< ckvalue results.json rms >}}"
+    ).replace("ckvalue", command)
+    assert len(calkit.quarto.extract_values(text, "doc.ipynb")) == 1
     assert calkit.quarto.read_document_text("missing.qmd") is None
     # Arguments read like the Markdown marker's, positionally or by name,
     # with a declared result's name standing for its path
@@ -36,7 +43,7 @@ def test_values(tmp_path, monkeypatch):
         "at {{< ckvalue speed key=speed format='{value:.1f} m/s' >}}; "
         "{{</* ckvalue escaped.json x */>}}\n"
         "{{< ckvalue results.json fit.coeffs.0 .1% >}}\n"
-    )
+    ).replace("ckvalue", command)
     values = calkit.quarto.extract_values(
         text, "doc.qmd", results={"speed": "metrics.yaml"}
     )
@@ -55,7 +62,7 @@ def test_values(tmp_path, monkeypatch):
     ]
     # A notebook stands for the values its cells save
     fit_values = calkit.quarto.extract_values(
-        "{{< ckvalue nbs/fit.ipynb k_25 .3f >}}", "doc.qmd"
+        f"{{{{< {command} nbs/fit.ipynb k_25 .3f >}}}}", "doc.qmd"
     )
     assert fit_values[0].path == (
         ".calkit/notebooks/outputs/nbs/fit.ipynb/values.json"
@@ -148,7 +155,8 @@ def test_values(tmp_path, monkeypatch):
 
 
 @pytest.mark.skipif(shutil.which("quarto") is None, reason="needs Quarto")
-def test_shortcode_matches_python(tmp_path, monkeypatch):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_shortcode_matches_python(tmp_path, monkeypatch, command):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "results").mkdir()
     (tmp_path / "results" / "r.json").write_text(
@@ -249,8 +257,8 @@ def test_shortcode_matches_python(tmp_path, monkeypatch):
     for i, (source, key, fmt) in enumerate(cases):
         source = source if source == "metrics" else f"path={source}"
         fmt = f" format='{fmt}'" if fmt else ""
-        lines.append(f"V{i}: {{{{< ckvalue {source} key={key}{fmt} >}}}}")
-    lines.append("Gone: {{< ckvalue results/gone.json x >}}")
+        lines.append(f"V{i}: {{{{< {command} {source} key={key}{fmt} >}}}}")
+    lines.append(f"Gone: {{{{< {command} results/gone.json x >}}}}")
     (tmp_path / "docs" / "doc.qmd").write_text("\n\n".join(lines) + "\n")
     values = calkit.quarto.extract_values(
         "\n".join(lines[:-1]),

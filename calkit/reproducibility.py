@@ -14,6 +14,7 @@ from calkit.provenance import (
     find_project_provenance_gaps,
     has_provenance,
 )
+from calkit.results import VALUE_COMMAND_PATTERN
 
 INSTRUCTIONS_NOTE = (
     "Note that these could be as simple as telling the user to "
@@ -611,7 +612,8 @@ def _mask_latex_macros(masked: str) -> str:
         r"\\includegraphics(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\includesvg(?:\[[^\]]*\])?\{[^}]*\}",
         r"\\ckfigure\s*(?:\[[^\]]*\])?\s*\{[^}]*\}",
-        r"\\ckvalue\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
+        rf"\\{VALUE_COMMAND_PATTERN}"
+        r"\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
         r"\\ckrefval\s*(?:\[[^\]]*\])?\s*\{[^}]*\}\s*\{[^}]*\}",
         r"\\cktable\s*\{[^}]*\}",
         r"\\ckinclude\s*\{[^}]*\}",
@@ -651,7 +653,8 @@ def _mask_markdown_zones(source: str) -> str:
     masked = re.sub(r"``[^\n]+?``|`[^`\n]+`", _mask_match, masked)
     # A Markdown stage writes each value between markers, so it's computed
     masked = re.sub(
-        r"<!--\s*(ckvalue|ckrefval)\b.*?-->.*?<!--\s*/\1\s*-->",
+        rf"<!--\s*({VALUE_COMMAND_PATTERN}|ckrefval)\b.*?-->"
+        r".*?<!--\s*/\1\s*-->",
         _mask_match,
         masked,
         flags=re.DOTALL,

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from calkit.results import VALUE_COMMAND_PATTERN
+
 # A Quarto extension, so documents use the shortcode without listing it,
 # written where Quarto looks for one: the Quarto project's folder, or the
 # document's without one
@@ -33,7 +35,9 @@ _YAML_MARKDOWN_RE = re.compile(r"[*\\<>`$^]|~~|\]\(|  |^\s|\s$")
 _FORMAT_FIELD_RE = re.compile(r"\{([^{}]*)\}")
 # A shortcode written {{</* ckvalue */>}} is Quarto's escaped form, shown
 # literally, so it doesn't match
-_SHORTCODE_RE = re.compile(r"\{\{<\s*ckvalue\s+(?P<args>.*?)\s*>\}\}")
+_SHORTCODE_RE = re.compile(
+    r"\{\{<\s*" + VALUE_COMMAND_PATTERN + r"\s+(?P<args>.*?)\s*>\}\}"
+)
 # {{< ckrefval key name format >}}, a value quoted from a reference
 _REFVAL_SHORTCODE_RE = re.compile(r"\{\{<\s*ckrefval\s+(?P<args>.*?)\s*>\}\}")
 # Quarto's own shortcode for a cell's output from another document, e.g.,
@@ -586,7 +590,7 @@ local function format_value(value, fmt)
   return ok and text or nil
 end
 
-return {
+local shortcodes = {
   ["ckvalue"] = function(args, kwargs)
     if project_dir == nil then
       project_dir = find_project_dir()
@@ -669,6 +673,9 @@ return {
     return pandoc.Str(text)
   end,
 }
+-- A shorter alias for ckvalue
+shortcodes["ckval"] = shortcodes["ckvalue"]
+return shortcodes
 """
 
 

@@ -219,6 +219,8 @@
   \ck@if@value{#2}{#3}%
     {\ck@link{results?path=#2\string&key=#3}{\ck@value{#1}{#2}{#3}}}%
     {\ck@missing{#3 from #2}}}
+% \ckval: a shorter alias for \ckvalue
+\newcommand\ckval{\ckvalue}
 % \ckrefval[format]{citation key}{name}: a value quoted from a reference,
 % which calkit.yaml records with where in the reference it is, and which
 % Calkit writes to the _calkit/values.tex beside the document. The

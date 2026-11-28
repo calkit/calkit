@@ -13,6 +13,7 @@ import calkit.docker
 import calkit.environments.docker
 import calkit.resources
 from calkit.cli.update import update_app
+from calkit.results import VALUE_COMMANDS
 
 runner = CliRunner()
 
@@ -1476,7 +1477,8 @@ def test_update_question(tmp_dir):
     assert ProjectInfo.model_validate(calkit.load_calkit_info())
 
 
-def test_update_markdown(tmp_dir):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_update_markdown(tmp_dir, command):
     def run(*args):
         return subprocess.run(
             ["calkit", "update", "markdown", *args],
@@ -1495,7 +1497,7 @@ def test_update_markdown(tmp_dir):
         "Only <!-- ckvalue _data/r.json summary.frac .0% -->?"
         "<!-- /ckvalue --> of\n"
         "<!-- ckvalue _data/r.json n -->?<!-- /ckvalue --> runs.\n"
-    )
+    ).replace("ckvalue", command)
     with open("_posts/a.md", "w") as f:
         f.write(post)
     with open("_posts/b.md", "w") as f:
@@ -1516,8 +1518,8 @@ def test_update_markdown(tmp_dir):
     assert res.stdout.strip() == "Updated values in _posts/a.md"
     with open("_posts/a.md") as f:
         text = f.read()
-    assert "-->60%<!-- /ckvalue -->" in text
-    assert "n -->15<!-- /ckvalue -->" in text
+    assert f"-->60%<!-- /{command} -->" in text
+    assert f"n -->15<!-- /{command} -->" in text
     assert run("--check", "_posts/a.md").returncode == 0
     # A block that isn't ended fails with what to add, and a bracketed
     # format, as LaTeX's \\ckvalue takes one, is moved after the key
@@ -1552,7 +1554,7 @@ def test_update_markdown(tmp_dir):
     res = run()
     assert res.returncode == 0, res.stdout + res.stderr
     with open("_posts/a.md") as f:
-        assert "-->80%<!-- /ckvalue -->" in f.read()
+        assert f"-->80%<!-- /{command} -->" in f.read()
     # A key the results file doesn't have is reported with its line
     with open("_posts/a.md", "a") as f:
         f.write("<!-- ckvalue _data/r.json missing -->?<!-- /ckvalue -->\n")

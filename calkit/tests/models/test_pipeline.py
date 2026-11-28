@@ -37,6 +37,7 @@ from calkit.models.pipeline import (
     quote_arg,
     quote_literal_arg,
 )
+from calkit.results import VALUE_COMMANDS
 
 
 def test_pythonscriptstage():
@@ -487,7 +488,8 @@ def test_latexstage(tmp_path):
     assert all_deps == [expected] * 3
 
 
-def test_quartostage(tmp_path):
+@pytest.mark.parametrize("command", VALUE_COMMANDS)
+def test_quartostage(tmp_path, command):
     s = QuartoStage(
         name="render-report",
         environment="analysis",
@@ -583,10 +585,12 @@ def test_quartostage(tmp_path):
     )
     (tmp_path / "report").mkdir()
     (tmp_path / "report" / "report.qmd").write_text(
-        "RMS {{< ckvalue metrics rms .2f >}}, n "
-        "{{< ckvalue path=data/n.json key=n >}}, and an escaped "
-        "{{</* ckvalue other.json x */>}}, and a typo "
-        "{{< ckvalue missing.json x >}}.\n"
+        (
+            "RMS {{< ckvalue metrics rms .2f >}}, n "
+            "{{< ckvalue path=data/n.json key=n >}}, and an escaped "
+            "{{</* ckvalue other.json x */>}}, and a typo "
+            "{{< ckvalue missing.json x >}}.\n"
+        ).replace("ckvalue", command)
     )
     s = QuartoStage(
         name="report",

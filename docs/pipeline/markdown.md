@@ -255,6 +255,11 @@ The RMS is <!-- ckvalue results.json rms .4f -->0.2933<!-- /ckvalue -->
 over <!-- ckvalue results.json n -->401<!-- /ckvalue --> samples.
 ```
 
+<!-- TODO: needs human review -->
+
+`ckval` is a shorter alias, closed with `/ckval`, e.g.,
+`<!-- ckval results.json n -->401<!-- /ckval -->`.
+
 A marker reads like a call: a results file, a key, and optionally a
 format.
 A value quoted from a reference uses `ckrefval` with its citation key and

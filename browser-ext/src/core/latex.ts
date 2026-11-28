@@ -50,10 +50,10 @@ export interface Citation {
   included?: boolean;
 }
 
-// Mirror _CK_COMMAND_RE in calkit/latex.py, where only \ckvalue takes a
-// second brace group
+// Mirror _CK_COMMAND_RE in calkit/latex.py, where only a value takes a
+// second brace group. Its commands are VALUE_COMMANDS in calkit/results.py.
 const CK_VALUE_RE =
-  /\\ck(value)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}\s*\{([^}]*)\}/g;
+  /\\(ckvalue|ckval)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}\s*\{([^}]*)\}/g;
 const CK_FILE_RE =
   /\\ck(figure|table|include)\s*(?:\[([^\]]*)\])?\s*\{([^}]*)\}/g;
 // The plain commands among _INPUT_COMMANDS in calkit/latex.py that show
@@ -89,7 +89,9 @@ export function citationsIn(line: string): CitationMatch[] {
     if (comment >= 0 && start >= comment) {
       continue;
     }
-    const [command, kind, options, first, second] = match;
+    const [command, name, options, first, second] = match;
+    // CK_VALUE_RE captures its whole command, since it has an alias
+    const kind = name.startsWith("ckval") ? "value" : name;
     const citation: Citation = command.startsWith("\\ck")
       ? {
           // \ckinclude inputs any TeX, like a plain \input
@@ -394,6 +396,7 @@ const NOT_TEXT: Record<string, number> = {
   ckinclude: 1,
   cknum: 1,
   cktable: 1,
+  ckval: 2,
   ckvalue: 2,
   cline: 1,
   cmidrule: 1,

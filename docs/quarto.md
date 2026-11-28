@@ -68,6 +68,10 @@ The RMS is {{< ckvalue results/metrics.json rms .3f >}}
 over {{< ckvalue results/metrics.json key=fit.n >}} samples.
 ```
 
+<!-- TODO: needs human review -->
+
+`ckval` is a shorter alias, e.g., `{{< ckval results/metrics.json rms >}}`.
+
 Paths are relative to the project.
 Results files can be JSON, YAML, or TOML,
 and keys are separated by dots to reach into nested values.

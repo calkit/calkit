@@ -30,6 +30,8 @@ from typing import Any, Literal
 import ruamel.yaml
 from pydantic import BaseModel
 
+from calkit.results import VALUE_COMMAND_PATTERN
+
 DirectiveKind = Literal["stage", "environment", "output", "value", "values"]
 # ``output`` blocks are written to, never read: a stage's extracted script
 # must not include what that stage printed, or injecting output would make
@@ -2564,9 +2566,9 @@ _VALUES_END_RE = re.compile(r"<!--\s*/calkit values\s*-->")
 # file path or a declared result's name, given on every marker: with a short
 # name this is still fewer characters than the long form needs with a
 # 'calkit values' directive above it, so nothing has to be implied from
-# elsewhere in the document.
+# elsewhere in the document. Its closing comment repeats its name.
 _CKVALUE_RE = re.compile(
-    r"<!--\s*(?P<cmd>ckvalue|ckrefval)\b(?P<args>.*?)-->"
+    rf"<!--\s*(?P<cmd>{VALUE_COMMAND_PATTERN}|ckrefval)\b(?P<args>.*?)-->"
     r"(?P<ctext>.*?)"
     r"<!--\s*/(?P=cmd)\s*-->"
 )
@@ -2994,7 +2996,8 @@ def format_value(value: Any, fmt: str | None = None) -> str:
 # A compact marker with calkit.sty's bracketed option, e.g.,
 # ``ckvalue[.4f] metrics rms``, which reads naturally coming from LaTeX
 _BRACKET_CKVALUE_RE = re.compile(
-    r"<!--(?P<lead>\s*)(?P<bcmd>ckvalue|ckrefval)\[(?P<bformat>[^\]]*)\]"
+    rf"<!--(?P<lead>\s*)(?P<bcmd>{VALUE_COMMAND_PATTERN}|ckrefval)"
+    r"\[(?P<bformat>[^\]]*)\]"
     r"(?P<bargs>.*?)-->"
 )
 

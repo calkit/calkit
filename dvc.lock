@@ -170,8 +170,8 @@ stages:
       size: 5368
   latex-word-round-trip-docx-pdf:
     cmd: calkit xenv -n libreoffice --no-check -- sh -c "soffice 
-      -env:UserInstallation=file:///tmp/calkit-libreoffice --headless --convert-to
-      pdf --outdir results/latex-word-round-trip 
+      -env:UserInstallation=file:///tmp/calkit-libreoffice --headless 
+      --convert-to pdf --outdir results/latex-word-round-trip 
       results/latex-word-round-trip/review.docx"
     deps:
     - path: .calkit/env-locks/libreoffice
@@ -261,7 +261,7 @@ stages:
       md5: ad60cc07e5c53f0803252e215ff43141
       size: 75297
   budget-2027:
-    cmd: uv run --locked --script scripts/budget.py --workshops=8 --attendees=25 
+    cmd: uv run --locked --script scripts/budget.py --workshops=8 --attendees=25
       --supported=60 --indirect-rate=0
     deps:
     - path: docs/one-pager/2027-budget.csv
@@ -376,8 +376,8 @@ stages:
     deps:
     - path: calkit/cli/latex.py
       hash: md5
-      md5: d751990ccc7bc8555ef64937601a5646
-      size: 199824
+      md5: 52e591744a99cf2da1388de0389c95ce
+      size: 199856
     - path: calkit/docx.py
       hash: md5
       md5: 83e04bd9da02144e6bcb80a5a749767d

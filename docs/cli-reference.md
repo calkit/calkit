@@ -4906,12 +4906,12 @@ Arguments:
 
 Options:
 
-| Option                   | Type    | Required | Default | Description                                                                                                                   |
-| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto, or `_system` for Quarto installed on this machine. There's no default. |
-| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.         |
-| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                     |
-| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                        |
+| Option                   | Type    | Required | Default | Description                                                                                                                                                                   |
+| ------------------------ | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`    | str     | no       |         | Environment to render in, which should provide Quarto, or `_system` for Quarto installed on this machine. Defaults to the environment of the document's quarto stage, if any. |
+| `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.                                                         |
+| `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                                                                     |
+| `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                                                                        |
 
 <a id="command-group-overleaf-ol"></a>
 

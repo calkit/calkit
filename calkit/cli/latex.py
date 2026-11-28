@@ -15,7 +15,6 @@ import sys
 from collections.abc import Callable, Iterator
 from copy import deepcopy
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import typer
 from typing_extensions import Annotated
@@ -23,9 +22,6 @@ from typing_extensions import Annotated
 import calkit
 import calkit.latex
 from calkit.cli import raise_error, warn
-
-if TYPE_CHECKING:
-    from calkit.models.pipeline import LatexStage
 
 latex_app = typer.Typer(no_args_is_help=True)
 
@@ -742,42 +738,6 @@ def warm_cache(
     typer.echo(f"TeX Live is ready in {view_dir}")
 
 
-def build_stage(
-    project_dir: str,
-    stage: LatexStage,
-    no_check: bool = False,
-    verbose: bool = False,
-    force: bool = False,
-    no_synctex: bool = False,
-    latexmk_args: list[str] | None = None,
-) -> None:
-    """Build a LaTeX document as its pipeline stage does."""
-    from typing import cast
-
-    import click
-
-    args = ["-e", stage.environment, *stage.make_build_args()]
-    for flag, given in [
-        ("--no-check", no_check),
-        ("--verbose", verbose),
-        ("-f", force),
-        ("--no-synctex", no_synctex),
-    ]:
-        if given and flag not in args:
-            args.append(flag)
-    for arg in latexmk_args or []:
-        args += ["--latexmk-arg", arg]
-    wdir = os.getcwd()
-    os.chdir(os.path.join(project_dir, stage.wdir or ""))
-    try:
-        group = cast(click.Group, typer.main.get_command(latex_app))
-        command = group.commands["build"]
-        with command.make_context("build", args + [stage.target_path]) as ctx:
-            command.invoke(ctx)
-    finally:
-        os.chdir(wdir)
-
-
 @latex_app.command(name="build")
 def build(
     tex_file: Annotated[str, typer.Argument(help="The .tex file to compile.")],
@@ -906,6 +866,10 @@ def build(
     # An editor builds every document with the same command, so each one
     # finds its stage here and builds with the stage's own arguments
     if as_stage:
+        from typing import cast
+
+        import click
+
         from calkit.environments import texlive as env_texlive
         from calkit.models.pipeline import LatexStage
         from calkit.pipeline import find_document_stages
@@ -934,15 +898,28 @@ def build(
                     f"Stages '{s.name}' and {others} all build {tex_file}; "
                     f"building it as '{s.name}'"
                 )
-            build_stage(
-                project_dir=project_dir,
-                stage=s,
-                no_check=no_check,
-                verbose=verbose,
-                force=force,
-                no_synctex=no_synctex,
-                latexmk_args=latexmk_args,
-            )
+            args = ["-e", s.environment, *s.make_build_args()]
+            for flag, given in [
+                ("--no-check", no_check),
+                ("--verbose", verbose),
+                ("-f", force),
+                ("--no-synctex", no_synctex),
+            ]:
+                if given and flag not in args:
+                    args.append(flag)
+            for arg in latexmk_args:
+                args += ["--latexmk-arg", arg]
+            wdir = os.getcwd()
+            os.chdir(os.path.join(project_dir, s.wdir or ""))
+            try:
+                group = cast(click.Group, typer.main.get_command(latex_app))
+                command = group.commands["build"]
+                with command.make_context(
+                    "build", args + [s.target_path]
+                ) as ctx:
+                    command.invoke(ctx)
+            finally:
+                os.chdir(wdir)
             return
         # Otherwise the only TeX Live environment, or switch picking one
         # here, unless they pick different ones

@@ -72,8 +72,8 @@ def render(
             "-e",
             help=(
                 "Environment to render in, which should provide Quarto, or "
-                "`_system` for Quarto installed on this machine. There's no "
-                "default."
+                "`_system` for Quarto installed on this machine. Defaults to "
+                "the environment of the document's quarto stage, if any."
             ),
         ),
     ] = None,

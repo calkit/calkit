@@ -17,7 +17,7 @@ import typer
 from typer.core import TyperCommand
 from typing_extensions import Annotated
 
-from calkit.cli import AliasGroup, raise_error, warn
+from calkit.cli import AliasGroup, raise_error
 from calkit.cli.latex import latex_app
 from calkit.cli.quarto import quarto_app
 
@@ -250,22 +250,19 @@ def build(
                 no_check=no_check,
             )
         return
-    # A LaTeX document with a pipeline stage builds as that stage unless
-    # stage-controlled options are overridden
+    # A LaTeX document a stage builds builds as that stage, unless an option
+    # the stage sets is given
     if tool == "LaTeX":
-        from calkit.cli.latex import build_stage
-
-        project_dir, _, found = calkit.pipeline.find_document_stages(
+        _, _, found = calkit.pipeline.find_document_stages(
             path, kinds=["latex"]
         )
-        matches = [s for _, s in found if isinstance(s, LatexStage)]
-        if project_dir is not None and matches:
+        if any(isinstance(s, LatexStage) for _, s in found):
             command = _get_command(latex_app, "build")
             with command.make_context(
                 ctx.info_name, [path] + args, parent=ctx.parent
             ) as sub_ctx:
                 p = sub_ctx.params
-                if not p["as_stage"] and all(
+                if all(
                     p[k] is None
                     for k in (
                         "environment",
@@ -274,22 +271,7 @@ def build(
                         "aux_dir",
                     )
                 ):
-                    if len(matches) > 1:
-                        others = ", ".join(f"'{m.name}'" for m in matches[1:])
-                        warn(
-                            f"Stages '{matches[0].name}' and {others} all "
-                            f"build {path}; building it as '{matches[0].name}'"
-                        )
-                    build_stage(
-                        project_dir=project_dir,
-                        stage=matches[0],
-                        no_check=bool(p["no_check"]),
-                        verbose=bool(p["verbose"]),
-                        force=bool(p["force"]),
-                        no_synctex=bool(p["no_synctex"]),
-                        latexmk_args=list(p["latexmk_args"] or []),
-                    )
-                    return
+                    p["as_stage"] = True
                 command.invoke(sub_ctx)
             return
     # A notebook executed by a jupyter-notebook stage rather than rendered

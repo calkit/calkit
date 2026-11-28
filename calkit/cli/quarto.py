@@ -108,8 +108,9 @@ def render(
     renders the document, its environment, format, arguments, and working
     directory are used.
     The values the document shows with the 'ckvalue' shortcode are checked
-    first, and the Quarto extension that reads them from their results
-    files is written.
+    first, where they and the figures, tables, and files it shows with
+    'ckfigure', 'cktable', and 'ckinclude' came from is worked out, and the
+    Quarto extension that shows them is written.
 
     Also available as `calkit doc build`.
     """
@@ -194,9 +195,41 @@ def render(
             write_values_file(ck_info, wdir=project_dir)
         if values:
             calkit.quarto.check_values(values, document_rel, wdir=project_dir)
+        # Where its components and values came from is decided now, from
+        # the pipeline as it stands, for the extension to show
+        components = (
+            calkit.quarto.extract_components(text)
+            if calkit.quarto.has_components(text)
+            else []
+        )
+        filter_problem = (
+            calkit.quarto.get_filter_problem(
+                text, document_rel, wdir=project_dir, to=to
+            )
+            if components
+            else None
+        )
+        # Not working out where something came from leaves it shown
+        # without, rather than stopping the render
+        if (components or values) and filter_problem is None:
+            try:
+                calkit.quarto.write_provenance(
+                    components,
+                    document_rel,
+                    ck_info,
+                    wdir=project_dir,
+                    values=values,
+                )
+            except Exception as e:
+                warn(
+                    f"Couldn't work out where what {target_path} shows came from: {e}"
+                )
+        if values or components:
             calkit.quarto.write_components(document_rel, wdir=project_dir)
     except (MarkdownParseError, ValueError) as e:
         raise_error(str(e))
+    if filter_problem is not None:
+        raise_error(filter_problem)
     cmd = ["quarto", "render", target_path]
     if to is not None:
         cmd += ["--to", to]

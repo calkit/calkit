@@ -4887,7 +4887,7 @@ calkit doc|document quarto COMMAND [ARGS]...
 
 Render a Quarto document in an environment.
 
-Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. If no environment or format is given and a pipeline `quarto` stage renders the document, its environment, format, arguments, and working directory are used. The values the document shows with the 'ckvalue' shortcode are checked first, and the Quarto extension that reads them from their results files is written.
+Quarto has to come from the environment, so every machine renders with the same version, unless the project lists 'quarto' as a requirement or the environment is `_system`, i.e., this machine. If no environment or format is given and a pipeline `quarto` stage renders the document, its environment, format, arguments, and working directory are used. The values the document shows with the 'ckvalue' shortcode are checked first, where they and the figures, tables, and files it shows with 'ckfigure', 'cktable', and 'ckinclude' came from is worked out, and the Quarto extension that shows them is written.
 
 Also available as `calkit doc build`.
 

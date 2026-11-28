@@ -167,7 +167,7 @@ def test_record_stage_output_dvc_file(tmp_dir):
         os.remove("dvc.lock")
 
 
-def test_hash_directory():
+def test_hash_directory(tmp_path):
     this_dir = os.path.dirname(__file__)
     fpath = os.path.join(this_dir, "..", "..", "..", "test", "dvc-md5-dir")
     res = calkit.dvc.hash_directory(fpath)
@@ -175,6 +175,16 @@ def test_hash_directory():
     assert res["size"] == 1226
     assert res["hash"] == "md5"
     assert res["md5"] == "ca2ffab71e00d528b974e583d789ec97.dir"
+    # Files are listed by path, as DVC lists them, not in walk order, which
+    # puts b.txt before a/x.txt, with the hash DVC recorded for these, written
+    # as bytes so Windows doesn't turn their newlines into CRLF
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b.txt").write_bytes(b"1\n")
+    (tmp_path / "a" / "x.txt").write_bytes(b"2\n")
+    (tmp_path / "a.txt").write_bytes(b"3\n")
+    res = calkit.dvc.hash_directory(str(tmp_path))
+    assert res["nfiles"] == 3
+    assert res["md5"] == "c5563ca380e227bf514dd3f9ea5c9733.dir"
 
 
 def test_frozen_stage_reproduce_warning_is_suppressed(caplog):

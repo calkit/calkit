@@ -11,6 +11,17 @@ whose envelope is shown in @fig-decay.
 
 {{< embed analysis.ipynb#fig-decay >}}
 
+The fit is a straight line through the logarithm of the peaks
+(@fig-peaks), listed in @tbl-peaks.
+
+::: {.ckfigure src="figures/peaks.svg" #fig-peaks width="70%"}
+Peaks of the displacement on a log scale, with the fitted decay.
+:::
+
+::: {.cktable src="results/peaks.csv" #tbl-peaks rows="5"}
+The first peaks, which the fit uses.
+:::
+
 The simulation's phase portrait (@fig-phase) spirals in to rest.
 
 ```{r}

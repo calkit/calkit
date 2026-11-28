@@ -137,6 +137,11 @@ app.add_typer(dev_app, name="dev", help="Developer tools.", hidden=True)
 app.add_typer(sync_app, name="sync", help="Sync with external systems.")
 
 
+# Where a running pipeline tells its stages about the run: its log, and the
+# commit it started from and whether that was all there was
+RUN_INFO_ENV_VAR = "CALKIT_RUN_INFO"
+
+
 def _to_shell_cmd(cmd: list[str]) -> str:
     """Join a command to be compatible with running at the shell.
 
@@ -4748,6 +4753,20 @@ def run(
     # otherwise it skips jobs it sees as already done.
     if force:
         os.environ["CALKIT_FORCE"] = "1"
+    # What a stage can say about this run while it's going, e.g., a
+    # document showing when the stages it's made from last ran, before
+    # their runs are recorded at the end
+    os.environ[RUN_INFO_ENV_VAR] = json.dumps(
+        {
+            "log_path": os.path.abspath(log_fpath),
+            "git_rev": git_rev,
+            "git_dirty": bool(
+                git_changed_files_before
+                or git_staged_files_before
+                or git_untracked_files_before
+            ),
+        }
+    )
     # DVC logs only its own output, so tee each stage process's stdout and
     # stderr into the run log as well as the terminal. DVC's repro is serial,
     # so stages can't interleave here.
@@ -4827,6 +4846,7 @@ def run(
             res = _run_dvc_repro(["repro"] + args)
     finally:
         os.environ.pop("CALKIT_FORCE", None)
+        os.environ.pop(RUN_INFO_ENV_VAR, None)
         dvc.stage.run._run = orig_run
     # Parse log to get timing and which stages ran
     with open(log_fpath, encoding="utf-8", errors="replace") as f:

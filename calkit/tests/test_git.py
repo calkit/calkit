@@ -785,3 +785,39 @@ def test_get_staged_files_for_a_deleted_path(tmp_dir):
         "gone.txt",
         "keep.txt",
     ]
+
+
+def test_get_web_file_url() -> None:
+    sha = "abc123"
+    for remote, expected in [
+        (
+            "git@github.com:org/proj.git",
+            "https://github.com/org/proj/blob/abc123/scripts/a%20b.py",
+        ),
+        (
+            "https://user:token@github.com/org/proj.git",
+            "https://github.com/org/proj/blob/abc123/scripts/a%20b.py",
+        ),
+        (
+            "ssh://git@gitlab.example.edu:2222/group/sub/proj.git",
+            "https://gitlab.example.edu/group/sub/proj/-/blob/abc123/"
+            "scripts/a%20b.py",
+        ),
+        (
+            "https://gitlab.com/group/proj",
+            "https://gitlab.com/group/proj/-/blob/abc123/scripts/a%20b.py",
+        ),
+        (
+            "http://gitlab.lab.internal/group/proj.git",
+            "http://gitlab.lab.internal/group/proj/-/blob/abc123/"
+            "scripts/a%20b.py",
+        ),
+        ("https://bitbucket.org/org/proj.git", None),
+        ("/home/me/repos/proj.git", None),
+        ("../proj", None),
+    ]:
+        got = calkit.git.get_web_file_url(remote, sha, "scripts/a b.py")
+        assert got == expected, remote
+    assert (
+        calkit.git.get_web_file_url("git@github.com:o/p.git", "", "a") is None
+    )

@@ -2444,6 +2444,14 @@ class ProjectInfo(Model):
     git_repo_url: str | None = Field(
         default=None, description="URL of the project's Git repository."
     )
+    show_provenance: bool = Field(
+        default=True,
+        description=(
+            "Show where each figure, table, file, and value a Quarto or MyST "
+            "document shows from the project came from, collapsed under it. "
+            "Each can turn it off for itself with 'provenance=false'."
+        ),
+    )
     derived_from: DerivedFromProject | None = Field(
         default=None,
         description="The project this one was created as a copy of.",

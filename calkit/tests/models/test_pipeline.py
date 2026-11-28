@@ -499,7 +499,7 @@ def test_quartostage(tmp_path):
     # Calkit renders it, checking Quarto comes from the environment and
     # resolving the document's values first
     assert sd["cmd"] == (
-        "calkit quarto render -e analysis --no-check report/report.qmd"
+        "calkit doc quarto render -e analysis --no-check report/report.qmd"
     )
     assert "report/report.qmd" in sd["deps"]
     assert "report/results.json" in sd["deps"]
@@ -528,7 +528,7 @@ def test_quartostage(tmp_path):
         outputs=["report/report.html"],
     )
     assert s.dvc_cmd == (
-        "calkit quarto render -e _system --no-check report/report.qmd"
+        "calkit doc quarto render -e _system --no-check report/report.qmd"
     )
     # A stage listing Quarto as a requirement says one installed on the
     # machine is expected
@@ -539,7 +539,7 @@ def test_quartostage(tmp_path):
         requirements=["quarto>=1.8"],
     )
     assert s.dvc_cmd == (
-        "calkit quarto render -e _system --no-check --allow-machine-quarto "
+        "calkit doc quarto render -e _system --no-check --allow-machine-quarto "
         "report/report.qmd"
     )
     # A notebook rendered with --execute gets its outputs written back, so
@@ -619,10 +619,56 @@ def test_quartostage(tmp_path):
     )
     assert s.dvc_deps[-2:] == ["../results/metrics.json", "../data/n.json"]
     assert (tmp_path / "_extensions/calkit/calkit.lua").is_file()
+    # The files its components show are inputs too, whether or not where
+    # they came from is shown, except what it makes itself, which can't be
+    # both
+    (tmp_path / "figures").mkdir()
+    (tmp_path / "figures" / "plot.svg").write_text("<svg/>")
+    (tmp_path / "report" / "report.qmd").write_text(
+        '::: {.ckfigure src="figures/plot.svg"}\n:::\n'
+        "::: {.ckfigure src=report/own/fig.svg}\n:::\n"
+        "::: {.cktable src=report/own.csv}\n:::\n"
+        "::: {.ckinclude src=data/n.json provenance=false}\n:::\n"
+        "::: {.ckfigure src=gone.png}\n:::\n"
+        "::: {.ckfigure}\n:::\n"
+    )
+    s.outputs = ["own", "own.csv"]
+    s.preprocess(
+        str(tmp_path),
+        lambda p: p in ("report/own/fig.svg", "report/own.csv", "data/n.json"),
+        write_files=True,
+    )
+    assert s.dvc_deps == [
+        "report.qmd",
+        "../figures/plot.svg",
+        "../data/n.json",
+    ]
+    s.outputs = []
     # One that shows nothing has nothing extra
     (tmp_path / "report" / "report.qmd").write_text("No values.\n")
     s.preprocess(str(tmp_path), lambda p: False, write_files=True)
     assert s.dvc_deps == ["report.qmd"]
+    # A notebook's components are in its Markdown cells, not its code
+    nb = {
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "source": ['::: {.ckfigure src="figures/plot.svg"}\n', ":::"],
+            },
+            {
+                "cell_type": "code",
+                "source": '"::: {.ckfigure src=data/n.json}"',
+            },
+        ]
+    }
+    (tmp_path / "nb.ipynb").write_text(json.dumps(nb))
+    nb_stage = QuartoStage(
+        name="nb", environment="analysis", target_path="nb.ipynb"
+    )
+    nb_stage.preprocess(
+        str(tmp_path), lambda p: p == "data/n.json", write_files=True
+    )
+    assert nb_stage.dvc_deps == ["nb.ipynb", "figures/plot.svg"]
     # The notebooks it embeds cells' outputs from are inputs too, and one
     # another stage executes makes it wait for that stage through one of
     # its outputs, since the notebook itself isn't one

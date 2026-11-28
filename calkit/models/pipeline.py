@@ -1942,7 +1942,7 @@ class QuartoStage(Stage):
     DVC-cached by default; use a ``PathOutput`` to store an output with Git
     instead.
 
-    It renders with ``calkit quarto render``, which checks Quarto comes from
+    It renders with ``calkit doc quarto render``, which checks Quarto comes from
     the stage's environment, or is a declared requirement, and resolves the
     values the document shows with the ``ckvalue`` shortcode first. A notebook
     rendered with ``--execute`` is depended on with its outputs stripped,
@@ -1964,8 +1964,10 @@ class QuartoStage(Stage):
         default=[], description="Extra arguments passed to 'quarto render'."
     )
 
-    # The results files the document's ckvalue shortcodes read, relative to
-    # the project, set by preprocess
+    # The results files the document's ckvalue shortcodes read, and the
+    # files its ckfigure, cktable, and ckinclude divs show, relative to the
+    # project, set by
+    # preprocess
     _value_paths: list[str] = PrivateAttr(default_factory=list)
     # The documents it embeds cells' outputs from, and outputs of the stages
     # that execute them, so it renders after them, relative to the project
@@ -1979,7 +1981,7 @@ class QuartoStage(Stage):
     def allows_machine_quarto(self) -> bool:
         """Whether Quarto from this machine is expected, as it is if the
         stage requires it, or the project does, which
-        ``calkit quarto render`` reads itself.
+        ``calkit doc quarto render`` reads itself.
         """
         import calkit.environments
 
@@ -2029,7 +2031,7 @@ class QuartoStage(Stage):
         much inputs as its source, and with ``write_files``, write the
         Quarto extension that shows the values.
 
-        A malformed shortcode is left for ``calkit quarto render`` to report
+        A malformed shortcode is left for ``calkit doc quarto render`` to report
         when the stage runs, rather than stopping the pipeline from
         compiling.
         """
@@ -2054,17 +2056,46 @@ class QuartoStage(Stage):
                 )
                 if exists(p) or is_output(p)
             ]
-        if "ckvalue" not in text and "ckrefval" not in text:
-            return
-        try:
-            ck_info = calkit.load_calkit_info(wdir=project_dir, read_only=True)
-            values = calkit.quarto.extract_values(
-                text,
-                self.project_target_path,
-                results=results_by_name(ck_info),
+        # The files its components show, which it renders after
+        divs = (
+            calkit.quarto.extract_components(text)
+            if calkit.quarto.has_components(text)
+            else []
+        )
+        # Except what it makes itself, e.g., a figure its code draws
+        own_paths = [
+            posixpath.normpath(posixpath.join(self.wdir or "", p))
+            for p in self.dvc_out_paths
+        ]
+        self._value_paths = list(
+            dict.fromkeys(
+                d.path
+                for d in divs
+                if d.path
+                and not any(
+                    d.path == p or d.path.startswith(p.rstrip("/") + "/")
+                    for p in own_paths
+                )
+                and (
+                    exists(d.path)
+                    or exists(d.path + ".dvc")
+                    or is_output(d.path)
+                )
             )
-        except (MarkdownParseError, ValueError):
-            values = []
+        )
+        values = []
+        if "ckvalue" in text or "ckrefval" in text:
+            try:
+                ck_info = calkit.load_calkit_info(
+                    wdir=project_dir, read_only=True
+                )
+                values = calkit.quarto.extract_values(
+                    text,
+                    self.project_target_path,
+                    results=results_by_name(ck_info),
+                )
+            except (MarkdownParseError, ValueError):
+                values = []
         for value in values:
             if (
                 exists(value.path)
@@ -2072,7 +2103,7 @@ class QuartoStage(Stage):
                 or is_output(value.path)
             ) and value.path not in self._value_paths:
                 self._value_paths.append(value.path)
-        if write_files and values:
+        if write_files and (values or divs):
             calkit.quarto.write_components(
                 self.project_target_path, wdir=project_dir
             )
@@ -2088,7 +2119,7 @@ class QuartoStage(Stage):
     @property
     def dvc_cmd(self) -> str:
         # Dispatched to a job scheduler or another machine as other stages
-        # are, with 'calkit quarto render' taking the place of the inner
+        # are, with 'calkit doc quarto render' taking the place of the inner
         # xenv; with no runtime to activate there, it renders as is
         inner_xenv = f"calkit xenv -n {self.inner_environment} --no-check --"
         prefix = self.xenv_cmd
@@ -2108,7 +2139,9 @@ class QuartoStage(Stage):
         if self.args:
             args += ["--"] + self.args
         # Quoted for cmd.exe too, which DVC runs commands with on Windows
-        cmd = "calkit quarto render " + " ".join(quote_arg(a) for a in args)
+        cmd = "calkit doc quarto render " + " ".join(
+            quote_arg(a) for a in args
+        )
         return f"{prefix} {cmd}".strip()
 
     @property

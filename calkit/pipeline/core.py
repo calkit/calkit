@@ -3905,12 +3905,14 @@ def to_dvc(
             if isinstance(i, InputsFromStageOutputs):
                 dvc_outs = dvc_stages[i.from_stage_outputs]["outs"]
                 for out in dvc_outs:
+                    # An output kept in Git is a dict keyed by its path,
+                    # which is what's compared with the deps
+                    if isinstance(out, dict):
+                        out = list(out.keys())[0]
                     if out not in dvc_stages[stage_name]["deps"]:
                         # Handle cases where outs are from a matrix,
                         # in which case this output could become a list of
                         # outputs
-                        if isinstance(out, dict):
-                            out = list(out.keys())[0]
                         if "${item." in out:
                             extra_outs = []
                             dvc_matrix = dvc_stages[i.from_stage_outputs][

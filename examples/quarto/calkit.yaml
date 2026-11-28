@@ -31,6 +31,17 @@ pipeline:
           storage: git
         - path: results/sim.json
           storage: git
+    energy:
+      kind: python-script
+      script_path: scripts/energy.py
+      environment: quarto
+      inputs:
+        - from_stage_outputs: simulate
+      outputs:
+        - path: results/energy.json
+          storage: git
+        - path: figures/energy.svg
+          storage: git
     analysis:
       kind: quarto
       target_path: analysis.ipynb
@@ -41,6 +52,10 @@ pipeline:
       outputs:
         - analysis.html
         - path: results/fit.json
+          storage: git
+        - path: results/peaks.csv
+          storage: git
+        - path: figures/peaks.svg
           storage: git
     report:
       kind: quarto

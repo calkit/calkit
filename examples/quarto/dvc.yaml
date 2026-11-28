@@ -13,26 +13,53 @@ stages:
           persist: false
     desc: Automatically generated from the 'simulate' stage in calkit.yaml.
       Changes made here will be overwritten.
+  energy:
+    cmd: calkit xenv -n quarto --no-check -- python scripts/energy.py
+    deps:
+      - scripts/energy.py
+      - pixi.lock
+      - data/sim.csv
+      - results/sim.json
+    outs:
+      - results/energy.json:
+          cache: false
+          persist: false
+      - figures/energy.svg:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'energy' stage in calkit.yaml.
+      Changes made here will be overwritten.
   analysis:
-    cmd: calkit quarto render -e quarto --no-check analysis.ipynb -- --execute
+    cmd: calkit doc quarto render -e quarto --no-check analysis.ipynb --
+      --execute
     deps:
       - .calkit/notebooks/cleaned/analysis.ipynb
       - pixi.lock
       - data/sim.csv
+      - figures/energy.svg
       - results/sim.json
+      - results/energy.json
     outs:
       - analysis.html
       - results/fit.json:
           cache: false
           persist: false
+      - results/peaks.csv:
+          cache: false
+          persist: false
+      - figures/peaks.svg:
+          cache: false
+          persist: false
     desc: Automatically generated from the 'analysis' stage in calkit.yaml.
       Changes made here will be overwritten.
   report:
-    cmd: calkit quarto render -e quarto --no-check report.qmd
+    cmd: calkit doc quarto render -e quarto --no-check report.qmd
     deps:
       - report.qmd
       - data/sim.csv
       - pixi.lock
+      - figures/peaks.svg
+      - results/peaks.csv
       - results/sim.json
       - results/fit.json
       - analysis.ipynb

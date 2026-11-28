@@ -4069,7 +4069,9 @@ def to_docx(
                 held_math += [
                     (p.bookmark, (el, k)) for k, el in enumerate(found_math)
                 ]
-    if held_math:
+    # Read back with Pandoc, as the display equations are, so without it
+    # they're only exported
+    if held_math and calkit.docx.find_pandoc() is not None:
         read_back_inline = calkit.docx.omml_to_latex(
             [el for _, (el, _) in held_math]
         )

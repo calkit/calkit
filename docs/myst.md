@@ -46,6 +46,7 @@ or with arguments for `myst build` in `args`, e.g., `[--html]` or
 `[--pdf]`, what those build,
 with exports where `myst.yml` or a document's front matter puts them,
 or in `_build/exports`.
+They're stored with DVC, or in Git with `build_storage: git`.
 Listing `outputs` replaces these.
 `calkit doc build site` with no `-e` builds it as the stage does,
 in its environment and with its arguments.

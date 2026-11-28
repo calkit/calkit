@@ -796,6 +796,9 @@ def test_myststage(tmp_path):
             "index.md" not in stage["target_path"]
         )
     assert (site / "_extensions" / "calkit" / "myst.mjs").is_file()
+    # What it builds can be kept in Git instead
+    s.build_storage = "git"
+    assert s.dvc_outs == [{"_build/site": {"cache": False}}]
     # Outside a MyST project it finds nothing, and MyST from this machine
     # is allowed if the stage requires it
     s = MystStage(

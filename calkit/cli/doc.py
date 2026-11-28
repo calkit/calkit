@@ -72,30 +72,80 @@ class _ToolArgsCommand(_PathFirstCommand):
         return super().parse_args(ctx, [args[0], "--", *args[1:]])
 
 
+# What a document is when both Quarto and MyST projects could build it
+_QUARTO_OR_MYST = "Quarto or MyST"
+
+
 def _get_tool(path: str) -> str | None:
-    """Get the name of the tool a document is written in, if known."""
+    """Get the name of the tool a document is written in, if known.
+
+    Markdown and notebooks are the tool's whose project they're in, i.e.,
+    the nearest folder above with a ``_quarto.yml`` or ``myst.yml``, as
+    far up as the Calkit project, or for a folder with both, either's.
+    """
+
+    def get_project_tools(folder: str) -> set[str]:
+        return {
+            "MyST" if t == "MyST" else "Quarto"
+            for f, t in _FOLDER_TOOLS.items()
+            if os.path.isfile(os.path.join(folder, f))
+        }
+
+    def get_tool_named(tools: set[str]) -> str:
+        return _QUARTO_OR_MYST if len(tools) > 1 else next(iter(tools))
+
     if os.path.isdir(path):
-        for fname, folder_tool in _FOLDER_TOOLS.items():
-            if os.path.isfile(os.path.join(path, fname)):
-                return folder_tool
-        return None
+        tools = get_project_tools(path)
+        if not tools:
+            return None
+        folder_tool = get_tool_named(tools)
+        return "Quarto project" if folder_tool == "Quarto" else folder_tool
     # MyST also builds from its config
     if os.path.basename(path) == "myst.yml":
         return "MyST"
-    tool = _SUFFIX_TOOLS.get(Path(path).suffix.lower())
-    # Markdown in a MyST project is MyST's, as far up as the Calkit project
-    if tool == "Markdown":
+    suffix = Path(path).suffix.lower()
+    tool = _SUFFIX_TOOLS.get(suffix)
+    if suffix in (".md", ".ipynb"):
         folder = os.path.dirname(os.path.abspath(path))
         while True:
-            if os.path.isfile(os.path.join(folder, "myst.yml")):
-                return "MyST"
+            tools = get_project_tools(folder)
+            if tools:
+                return get_tool_named(tools)
             parent = os.path.dirname(folder)
             if parent == folder or os.path.isfile(
                 os.path.join(folder, "calkit.yaml")
             ):
-                return tool
+                break
             folder = parent
     return tool
+
+
+def _resolve_quarto_or_myst(path: str) -> str:
+    """Get the tool for a document both Quarto and MyST projects could
+    build, from the pipeline stage building it, rather than guessing."""
+    import calkit.myst
+    import calkit.pipeline
+
+    project_dir, ck_info, found = calkit.pipeline.find_document_stages(
+        path, kinds=["quarto"], inside=os.path.isdir(path)
+    )
+    tools = set()
+    if found:
+        tools.add("Quarto project" if os.path.isdir(path) else "Quarto")
+    if project_dir is not None:
+        rel = Path(
+            os.path.relpath(os.path.abspath(path), project_dir)
+        ).as_posix()
+        if calkit.myst.get_build_stage(rel, ck_info, wdir=project_dir):
+            tools.add("MyST")
+    if len(tools) == 1:
+        return tools.pop()
+    raise_error(
+        f"Both Quarto and MyST could build {path}, and "
+        + ("stages for both do" if tools else "no stage says which")
+        + "; build it with 'calkit doc quarto render' or "
+        "'calkit doc myst build'"
+    )
 
 
 def _get_options(args: list[str]) -> list[str]:
@@ -213,7 +263,9 @@ def build(
     notebook with `calkit doc quarto render`, a Word document with
     `calkit office word-to-pdf`, a PowerPoint deck to a PDF beside it
     with `calkit export pptx`, and a MyST project, its myst.yml, or a
-    document in it with `calkit doc myst build`.
+    document in it with `calkit doc myst build`. Markdown and notebooks go
+    to the tool whose project they're in, and where both a Quarto and a
+    MyST project could build one, to the one whose stage does.
 
     A document a pipeline stage builds is built as that stage does, i.e.,
     in its environment and with its options, unless options for those are
@@ -229,6 +281,8 @@ def build(
 
     args = list(tool_args or [])
     tool = _get_tool(path)
+    if tool == _QUARTO_OR_MYST:
+        tool = _resolve_quarto_or_myst(path)
     if _wants_help(args):
         tool = "Quarto" if tool == "Quarto project" else tool
         _run(ctx, "build", path, [path] + args, tool=tool)
@@ -300,7 +354,7 @@ def build(
         a.startswith(("-o", "--output")) for a in options
     ):
         args += ["-o", Path(path).with_suffix(".pdf").as_posix()]
-    _run(ctx, "build", path, [path] + args)
+    _run(ctx, "build", path, [path] + args, tool=tool)
 
 
 @doc_app.command(name="diff", cls=_ToolArgsCommand)

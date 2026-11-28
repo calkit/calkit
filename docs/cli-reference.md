@@ -4490,7 +4490,7 @@ Work with documents.
 
 Build a document with its tool.
 
-A .tex file is built with `calkit doc latex build`, a Quarto document or notebook with `calkit doc quarto render`, a Word document with `calkit office word-to-pdf`, a PowerPoint deck to a PDF beside it with `calkit export pptx`, and a MyST project, its myst.yml, or a document in it with `calkit doc myst build`.
+A .tex file is built with `calkit doc latex build`, a Quarto document or notebook with `calkit doc quarto render`, a Word document with `calkit office word-to-pdf`, a PowerPoint deck to a PDF beside it with `calkit export pptx`, and a MyST project, its myst.yml, or a document in it with `calkit doc myst build`. Markdown and notebooks go to the tool whose project they're in, and where both a Quarto and a MyST project could build one, to the one whose stage does.
 
 A document a pipeline stage builds is built as that stage does, i.e., in its environment and with its options, unless options for those are given, and a Quarto project folder builds each document a stage renders in it.
 

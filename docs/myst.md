@@ -15,6 +15,10 @@ calkit doc build site -e _system -- --html
 
 Given a document in the project instead, e.g., `site/index.md`,
 it builds only that document's exports, as `myst build` does given a file.
+A Markdown file or notebook is built with whichever of Quarto or MyST has
+a project, i.e., a `_quarto.yml` or `myst.yml`, nearest above it.
+In a folder with both, a stage building it says which,
+and without one, Calkit asks rather than guessing.
 Either way it runs `calkit doc myst build` from the project's folder.
 
 <!-- TODO: needs human review -->

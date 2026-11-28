@@ -210,6 +210,50 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         assert result.exit_code == 0, (args, result.output)
         assert calls == [("quarto", expected)], args
         assert os.path.samefile(os.getcwd(), tmp_path / "sub")
+    # Markdown and notebooks are the tool's whose project they're in, and
+    # in a folder with both, a stage's, rather than either guessing
+    Path("../book/ch1.md").write_text("# One\n")
+    Path("../site/nb.ipynb").write_text("{}\n")
+    os.makedirs("../dual")
+    Path("../dual/_quarto.yml").write_text("project: {}\n")
+    Path("../dual/myst.yml").write_text("version: 1\n")
+    Path("../dual/a.md").write_text("A.\n")
+    for args, expected in [
+        (
+            ["../book/ch1.md", "-e", "_system", "--allow-machine-quarto"],
+            ["render", "../book/ch1.md"],
+        ),
+        (["../site/nb.ipynb"], ["build", "nb.ipynb", "--site"]),
+    ]:
+        calls.clear()
+        result = CliRunner().invoke(app, ["doc", "build", *args])
+        assert result.exit_code == 0, (args, result.output)
+        assert calls == [("quarto", expected)], args
+    result = CliRunner().invoke(app, ["doc", "build", "../dual/a.md"])
+    assert result.exit_code != 0
+    assert "no stage says which" in click.unstyle(result.output)
+    info = calkit.load_calkit_info(wdir=str(tmp_path))
+    stages = info["pipeline"]["stages"]
+    stages["dual"] = {
+        "kind": "myst",
+        "environment": "_system",
+        "target_path": "dual",
+        "requirements": ["myst"],
+    }
+    calkit.save_calkit_info(info, wdir=str(tmp_path))
+    calls.clear()
+    result = CliRunner().invoke(app, ["doc", "build", "../dual/a.md"])
+    assert result.exit_code == 0, result.output
+    assert calls == [("quarto", ["build", "a.md"])]
+    stages["dual-quarto"] = {
+        "kind": "quarto",
+        "environment": "_system",
+        "target_path": "dual/a.md",
+    }
+    calkit.save_calkit_info(info, wdir=str(tmp_path))
+    result = CliRunner().invoke(app, ["doc", "build", "../dual/a.md"])
+    assert result.exit_code != 0
+    assert "stages for both do" in click.unstyle(result.output)
 
 
 def test_build_as_stage(

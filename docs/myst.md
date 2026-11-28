@@ -34,15 +34,19 @@ pipeline:
       kind: myst
       target_path: site
       environment: _system
-      args: [--html]
-      outputs:
-        - site/_build/html
 ```
 
 Its documents, their `myst.yml`, and the files and results files they
 show or include are found when the pipeline compiles,
 so they're inputs without being listed,
 and the site is built again when they change.
+What it builds is its output, as `myst build` would write it:
+the site, if `myst.yml` defines one,
+or with arguments for `myst build` in `args`, e.g., `[--html]` or
+`[--pdf]`, what those build,
+with exports where `myst.yml` or a document's front matter puts them,
+or in `_build/exports`.
+Listing `outputs` replaces these.
 `calkit doc build site` with no `-e` builds it as the stage does,
 in its environment and with its arguments.
 

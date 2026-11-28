@@ -44,6 +44,3 @@ pipeline:
       kind: myst
       target_path: paper
       environment: py
-      args: [--site, --ci]
-      outputs:
-        - paper/_build/site

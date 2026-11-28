@@ -725,8 +725,10 @@ Its documents, their `myst.yml`, and the files they show or include
 are found when the pipeline compiles, so they're inputs without being
 listed, and Calkit's MyST plugin is written then too.
 
-Outputs are declared explicitly, e.g., `_build/site`, since what's
-built depends on the arguments.
+Its outputs are what `myst build` writes with its arguments, e.g.,
+`_build/site` for a site, and its exports where `myst.yml` or a
+document's front matter puts them, or `_build/exports`, unless
+`outputs` lists others.
 
 | Kind-specific parameter | Type      | Required | Default | Description                                                                          |
 | ----------------------- | --------- | -------- | ------- | ------------------------------------------------------------------------------------ |

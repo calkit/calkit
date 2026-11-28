@@ -234,6 +234,38 @@ def test_directives(tmp_path: Path) -> None:
     assert plugin_path.read_text(encoding="utf-8") == calkit.myst.PLUGIN_JS
     css_path = tmp_path / "site" / calkit.myst.PLUGIN_CSS_PATH
     assert css_path.read_text(encoding="utf-8") == calkit.myst.PLUGIN_CSS
+    # What a build writes: the site, as myst.yml defines one, and exports
+    # where they're declared, or by default, for the formats given
+    (tmp_path / "book").mkdir()
+    (tmp_path / "book" / "myst.yml").write_text(
+        "version: 1\nproject:\n  exports:\n"
+        "    - format: md\n      output: out/project.md\nsite: {}\n"
+    )
+    (tmp_path / "book" / "index.md").write_text(
+        "---\nexports:\n  - format: pdf\n---\n# Hi\n"
+    )
+    (tmp_path / "book" / "two.md").write_text("# Two\n")
+    site, html = "book/_build/site", "book/_build/html"
+    exports, project_md = "book/_build/exports", "book/out/project.md"
+    for document, args, expected in [
+        (None, [], [site]),
+        (None, ["--site", "--ci"], [site]),
+        (None, ["--html"], [html]),
+        (None, ["--md"], [project_md]),
+        (None, ["--pdf"], [exports]),
+        (None, ["--all"], [site, project_md, exports]),
+        ("book/index.md", [], [exports]),
+        ("book/two.md", [], []),
+        ("book/two.md", ["--md"], [exports]),
+    ]:
+        assert (
+            calkit.myst.get_build_outputs(
+                "book", document, args, wdir=str(tmp_path)
+            )
+            == expected
+        ), (document, args)
+    (tmp_path / "book" / "myst.yml").write_text("version: 1\n")
+    assert calkit.myst.get_build_outputs("book", None, [], str(tmp_path)) == []
     # A target is a project's folder, its myst.yml, or a document in it,
     # whose project is the nearest folder above with a myst.yml
     (tmp_path / "elsewhere").mkdir()

@@ -839,6 +839,119 @@ def get_target_paths(
     return folder, target
 
 
+# The export formats 'myst build' options build, as exports name them
+EXPORT_FLAGS = {
+    "--pdf": "pdf",
+    "--tex": "tex",
+    "--typst": "typst",
+    "--word": "docx",
+    "--docx": "docx",
+    "--md": "md",
+    "--jats": "jats",
+    "--xml": "jats",
+    "--meca": "meca",
+    "--cff": "cff",
+}
+
+
+def get_build_outputs(
+    myst_dir: str,
+    document: str | None,
+    args: list[str],
+    wdir: str | None = None,
+) -> list[str]:
+    """What ``myst build`` writes, built from a MyST project's folder with
+    these arguments, given a document or not, as POSIX paths relative to
+    ``wdir``, like ``myst_dir`` and ``document``.
+
+    The site goes to ``_build/site`` with ``--site`` or ``--all``, or with
+    no format given when ``myst.yml`` defines one, and ``--html`` to
+    ``_build/html``. Exports go where ``myst.yml``'s or a document's front
+    matter says, or else to ``_build/exports``: those of the formats
+    given, or all, with ``--all`` or for a document given without one.
+    """
+    import calkit
+
+    def load_yaml(text: str) -> dict:
+        try:
+            loaded = calkit.core._load_yaml_readonly(text)
+        except Exception:
+            return {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def get_front_matter(path: str) -> dict:
+        try:
+            with open(os.path.join(wdir or "", path), encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            return {}
+        if not text.startswith("---"):
+            return {}
+        end = text.find("\n---", 3)
+        return load_yaml(text[3:end]) if end != -1 else {}
+
+    def get_exports(info: dict) -> list:
+        exports = info.get("exports") or []
+        return [e for e in exports if isinstance(e, dict)]
+
+    build_dir = posixpath.normpath(posixpath.join(myst_dir, "_build"))
+    try:
+        with open(
+            os.path.join(wdir or "", myst_dir, "myst.yml"), encoding="utf-8"
+        ) as f:
+            config = load_yaml(f.read())
+    except OSError:
+        config = {}
+    project = config.get("project")
+    project = project if isinstance(project, dict) else {}
+    options = args[: args.index("--")] if "--" in args else args
+    flags = {a for a in options if a.startswith("-")}
+    files = [a for a in options if not a.startswith("-")]
+    if document is not None:
+        files.append(posixpath.relpath(document, myst_dir))
+    formats = {EXPORT_FLAGS[f] for f in flags if f in EXPORT_FLAGS}
+    build_all = bool(flags & {"-a", "--all"})
+    outputs = []
+    if "--html" in flags:
+        outputs.append(f"{build_dir}/html")
+    if (
+        "--site" in flags
+        or build_all
+        or (not formats and not files and "--html" not in flags)
+    ) and ("site" in config or "--site" in flags):
+        outputs.append(f"{build_dir}/site")
+    # Exports, each from the file declaring it, and the project's only
+    # when no document is given
+    if formats or build_all or files:
+        declared = (
+            [] if files else [(e, myst_dir) for e in get_exports(project)]
+        )
+        paths = [
+            posixpath.normpath(posixpath.join(myst_dir, f)) for f in files
+        ] or find_documents(myst_dir, wdir=wdir)
+        for path in paths:
+            front_matter = get_front_matter(path)
+            declared += [
+                (e, posixpath.dirname(path)) for e in get_exports(front_matter)
+            ]
+        # A document given is exported in a format given, declared or not
+        to_default = bool(files and formats) or "--force" in flags
+        for export, base in declared:
+            fmt = str(export.get("format") or "").split("+")[0]
+            if formats and not build_all and fmt not in formats:
+                continue
+            output = export.get("output")
+            if isinstance(output, str) and output:
+                outputs.append(
+                    posixpath.normpath(posixpath.join(base, output))
+                )
+            else:
+                to_default = True
+        if to_default:
+            outputs.append(f"{build_dir}/exports")
+    return list(dict.fromkeys(outputs))
+
+
 def get_build_stage(
     target_path: str, ck_info: dict, wdir: str | None = None
 ) -> str | None:

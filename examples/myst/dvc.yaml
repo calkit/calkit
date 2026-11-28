@@ -36,7 +36,7 @@ stages:
     desc: Automatically generated from the 'plot' stage in calkit.yaml. Changes
       made here will be overwritten.
   paper:
-    cmd: calkit doc myst build -e py --no-check paper -- --site --ci
+    cmd: calkit doc myst build -e py --no-check paper
     deps:
       - pixi.lock
       - paper/myst.yml

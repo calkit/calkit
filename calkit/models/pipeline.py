@@ -2173,8 +2173,10 @@ class MystStage(Stage):
     are found when the pipeline compiles, so they're inputs without being
     listed, and Calkit's MyST plugin is written then too.
 
-    Outputs are declared explicitly, e.g., ``_build/site``, since what's
-    built depends on the arguments.
+    Its outputs are what ``myst build`` writes with its arguments, e.g.,
+    ``_build/site`` for a site, and its exports where ``myst.yml`` or a
+    document's front matter puts them, or ``_build/exports``, unless
+    ``outputs`` lists others.
     """
 
     kind: Literal["myst"] = "myst"
@@ -2189,8 +2191,10 @@ class MystStage(Stage):
     )
 
     # The documents, their myst.yml, and the files they show or include,
-    # relative to the project, set by preprocess
+    # and what it builds, unless outputs says, relative to the project, set
+    # by preprocess
     _document_paths: list[str] = PrivateAttr(default_factory=list)
+    _built_paths: list[str] = PrivateAttr(default_factory=list)
 
     @property
     def project_target_path(self) -> str:
@@ -2244,11 +2248,16 @@ class MystStage(Stage):
             )
 
         self._document_paths = []
+        self._built_paths = []
         myst_dir, document = calkit.myst.get_target_paths(
             self.project_target_path, wdir=project_dir
         )
         if myst_dir is None:
             return
+        if not self.outputs:
+            self._built_paths = calkit.myst.get_build_outputs(
+                myst_dir, document, self.args, wdir=project_dir
+            )
         config_path = posixpath.normpath(posixpath.join(myst_dir, "myst.yml"))
         # Except what it makes itself, e.g., its build folder
         own_paths = [
@@ -2317,6 +2326,13 @@ class MystStage(Stage):
         # Quoted for cmd.exe too, which DVC runs commands with on Windows
         cmd = "calkit doc myst build " + " ".join(quote_arg(a) for a in args)
         return f"{prefix} {cmd}".strip()
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        built: list[str | dict] = [
+            self.path_from_wdir(p) for p in self._built_paths
+        ]
+        return built + super().dvc_outs
 
     @property
     def dvc_deps(self) -> list[str]:

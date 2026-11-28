@@ -61,7 +61,7 @@ stages:
       md5: 3bec6190558a3ec3626e2c7d3d41c283
       size: 23951
   paper:
-    cmd: calkit doc myst build -e py --no-check paper -- --site --ci
+    cmd: calkit doc myst build -e py --no-check paper
     deps:
     - path: data/decay.csv
       hash: md5
@@ -90,6 +90,6 @@ stages:
     outs:
     - path: paper/_build/site
       hash: md5
-      md5: 8bfaae8a5c0fb2872be0bf57f787f4f3.dir
+      md5: e78f90d0d0147823b9c2fe504e789687.dir
       size: 97574
       nfiles: 9

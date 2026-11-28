@@ -739,8 +739,9 @@ def test_myststage(tmp_path):
         "script_path": "plot.py",
         "outputs": ["figures/plot.svg"],
     }
-    # Its folder, its myst.yml, or with a wdir, a document in it alone
-    for stage, cmd, expected in [
+    # Its folder, its myst.yml, or with a wdir, a document in it alone,
+    # building what its arguments say, unless its outputs say otherwise
+    for stage, cmd, expected, outs in [
         (
             {"target_path": "site", "outputs": ["site/_build/site"]},
             "calkit doc myst build -e py --no-check site -- --site --ci",
@@ -752,16 +753,19 @@ def test_myststage(tmp_path):
                 "figures/plot.svg",
                 "results/fit.json",
             ],
+            ["site/_build/site"],
         ),
         (
             {"target_path": "site/myst.yml"},
             "calkit doc myst build -e py --no-check site/myst.yml -- --site --ci",
             ["site/myst.yml", "site/index.md", "site/page.md"],
+            ["site/_build/site"],
         ),
         (
             {"wdir": "site", "target_path": "index.md"},
             "calkit doc myst build -e py --no-check index.md -- --site --ci",
             ["myst.yml", "index.md", "../figures/plot.svg"],
+            ["_build/site"],
         ),
     ]:
         pipeline = Pipeline.model_validate(
@@ -787,6 +791,7 @@ def test_myststage(tmp_path):
         for dep in expected:
             assert dep in deps, (stage, dep)
         assert not any("_build" in d for d in deps), stage
+        assert s.dvc_out_paths == outs, stage
         assert ("site/page.md" in deps or "page.md" in deps) == (
             "index.md" not in stage["target_path"]
         )

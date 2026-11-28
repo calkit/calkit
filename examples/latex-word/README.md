@@ -26,3 +26,11 @@ calkit doc merge-docx reviews/main-for-review.docx
 Check `git diff` to see what landed in the source, then rebuild and export
 again (with `--force` to replace the old copy) for another round.
 Records of each export and merge are written under `.calkit/latex/`.
+
+<!-- TODO: needs human review -->
+
+## Starting a project from this example
+
+```sh
+calkit new project my-project --from calkit/calkit/examples/latex-word
+```

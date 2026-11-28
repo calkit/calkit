@@ -1,0 +1,10 @@
+version: 1
+project:
+  title: Exponential decay
+  # Shows figures, tables, and values with where they came from
+  plugins:
+    - _extensions/calkit/myst.mjs
+site:
+  template: book-theme
+  options:
+    style: _extensions/calkit/myst.css

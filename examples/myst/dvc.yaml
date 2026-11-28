@@ -1,0 +1,64 @@
+stages:
+  generate:
+    cmd: calkit xenv -n py --no-check -- python scripts/generate.py
+    deps:
+      - scripts/generate.py
+      - pixi.lock
+    outs:
+      - data/decay.csv:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'generate' stage in calkit.yaml.
+      Changes made here will be overwritten.
+  fit:
+    cmd: calkit xenv -n py --no-check -- python scripts/fit.py
+    deps:
+      - scripts/fit.py
+      - data/decay.csv
+      - pixi.lock
+    outs:
+      - results/fit.json:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'fit' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  plot:
+    cmd: calkit xenv -n py --no-check -- python scripts/plot.py
+    deps:
+      - scripts/plot.py
+      - data/decay.csv
+      - results/fit.json
+      - pixi.lock
+    outs:
+      - figures/fit.svg:
+          cache: false
+          persist: false
+    desc: Automatically generated from the 'plot' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  site:
+    cmd: calkit doc myst build -e py --no-check paper -- --html
+    deps:
+      - pixi.lock
+      - paper/myst.yml
+      - paper/index.md
+      - figures/fit.svg
+      - data/decay.csv
+      - results/fit.json
+    outs:
+      - paper/_build/html
+    desc: Automatically generated from the 'site' stage in calkit.yaml. Changes
+      made here will be overwritten.
+  pdf:
+    cmd: calkit doc myst build -e py --no-check paper/index.md -- --typst
+    deps:
+      - pixi.lock
+      - paper/myst.yml
+      - paper/index.md
+      - figures/fit.svg
+      - data/decay.csv
+      - results/fit.json
+    outs:
+      - paper/paper.pdf:
+          cache: false
+    desc: Automatically generated from the 'pdf' stage in calkit.yaml. Changes
+      made here will be overwritten.

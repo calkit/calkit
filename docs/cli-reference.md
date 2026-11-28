@@ -4482,6 +4482,7 @@ Work with documents.
 | [`merge-docx`](#subcommand-doc-document-merge-docx) | Merge a reviewed Word document back into its source. |
 | [`latex\|tex`](#subcommand-doc-document-latex-tex)  | Work with LaTeX.                                     |
 | [`quarto`](#subcommand-doc-document-quarto)         | Work with Quarto.                                    |
+| [`myst`](#subcommand-doc-document-myst)             | Work with MyST.                                      |
 
 <a id="subcommand-doc-document-build"></a>
 
@@ -4489,7 +4490,7 @@ Work with documents.
 
 Build a document with its tool.
 
-A .tex file is built with `calkit doc latex build`, a Quarto document or notebook with `calkit doc quarto render`, a Word document with `calkit office word-to-pdf`, and a PowerPoint deck to a PDF beside it with `calkit export pptx`.
+A .tex file is built with `calkit doc latex build`, a Quarto document or notebook with `calkit doc quarto render`, a Word document with `calkit office word-to-pdf`, a PowerPoint deck to a PDF beside it with `calkit export pptx`, and a MyST project, its myst.yml, or a document in it with `calkit doc myst build`. Markdown and notebooks go to the tool whose project they're in, and where both a Quarto and a MyST project could build one, to the one whose stage does.
 
 A document a pipeline stage builds is built as that stage does, i.e., in its environment and with its options, unless options for those are given, and a Quarto project folder builds each document a stage renders in it.
 
@@ -4912,6 +4913,55 @@ Options:
 | `--allow-machine-quarto` | boolean | no       | False   | Allow Quarto installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.                                                         |
 | `--to`                   | str     | no       |         | Output format, passed to 'quarto render'.                                                                                                                                     |
 | `--no-check`             | boolean | no       | False   | Don't check the environment is valid before rendering.                                                                                                                        |
+
+<a id="subcommand-doc-document-myst"></a>
+
+#### `calkit doc|document myst`
+
+Work with MyST.
+
+Usage:
+
+```text
+calkit doc|document myst COMMAND [ARGS]...
+```
+
+| Command                                        | Description                                                     |
+| ---------------------------------------------- | --------------------------------------------------------------- |
+| [`build`](#subcommand-doc-document-myst-build) | Build a MyST project, or one document in it, in an environment. |
+
+<a id="subcommand-doc-document-myst-build"></a>
+
+##### `calkit doc|document myst build`
+
+Build a MyST project, or one document in it, in an environment.
+
+It builds from the project's folder, i.e., where its myst.yml is, passing a document to 'myst build' to build only its exports.
+
+The values its documents show with the 'ckvalue' and 'ckrefval' roles, and where they and the figures, tables, and files they show with the 'ckfigure', 'cktable', and 'ckinclude' directives came from, are worked out first, from the pipeline as it stands, and the MyST plugin that shows them is written. MyST has to come from the environment, so every machine builds with the same version, unless the project lists 'myst' as a requirement or the environment is `_system`, i.e., this machine.
+
+Also available as `calkit doc build`.
+
+Usage:
+
+```text
+calkit doc|document myst build [OPTIONS] TARGET-PATH [MYST-ARGS...]
+```
+
+Arguments:
+
+| Argument      | Type      | Required | Default | Description                                                                  |
+| ------------- | --------- | -------- | ------- | ---------------------------------------------------------------------------- |
+| `target_path` | str       | yes      |         | The MyST project's folder, its myst.yml, or a document in it to build alone. |
+| `myst_args`   | list[str] | no       |         | Arguments for 'myst build', after '--', e.g., '-- --html'.                   |
+
+Options:
+
+| Option                 | Type    | Required | Default | Description                                                                                                                                                 |
+| ---------------------- | ------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--environment`, `-e`  | str     | no       |         | Environment to build in, which should provide MyST, or `_system` for MyST installed on this machine. Defaults to the environment of its myst stage, if any. |
+| `--allow-machine-myst` | boolean | no       | False   | Allow MyST installed on this machine rather than in the environment, e.g., for a stage listing it as a requirement.                                         |
+| `--no-check`           | boolean | no       | False   | Don't check the environment is valid before building.                                                                                                       |
 
 <a id="command-group-overleaf-ol"></a>
 

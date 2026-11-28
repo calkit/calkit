@@ -19,11 +19,13 @@ from typing_extensions import Annotated
 
 from calkit.cli import AliasGroup, raise_error
 from calkit.cli.latex import latex_app
+from calkit.cli.myst import myst_app
 from calkit.cli.quarto import quarto_app
 
 doc_app = typer.Typer(cls=AliasGroup, no_args_is_help=True)
 doc_app.add_typer(latex_app, name="latex|tex", help="Work with LaTeX.")
 doc_app.add_typer(quarto_app, name="quarto", help="Work with Quarto.")
+doc_app.add_typer(myst_app, name="myst", help="Work with MyST.")
 
 # The tool a document is written in, from its extension, or for a folder,
 # from the project file in it
@@ -70,14 +72,80 @@ class _ToolArgsCommand(_PathFirstCommand):
         return super().parse_args(ctx, [args[0], "--", *args[1:]])
 
 
+# What a document is when both Quarto and MyST projects could build it
+_QUARTO_OR_MYST = "Quarto or MyST"
+
+
 def _get_tool(path: str) -> str | None:
-    """Get the name of the tool a document is written in, if known."""
+    """Get the name of the tool a document is written in, if known.
+
+    Markdown and notebooks are the tool's whose project they're in, i.e.,
+    the nearest folder above with a ``_quarto.yml`` or ``myst.yml``, as
+    far up as the Calkit project, or for a folder with both, either's.
+    """
+
+    def get_project_tools(folder: str) -> set[str]:
+        return {
+            "MyST" if t == "MyST" else "Quarto"
+            for f, t in _FOLDER_TOOLS.items()
+            if os.path.isfile(os.path.join(folder, f))
+        }
+
+    def get_tool_named(tools: set[str]) -> str:
+        return _QUARTO_OR_MYST if len(tools) > 1 else next(iter(tools))
+
     if os.path.isdir(path):
-        for fname, tool in _FOLDER_TOOLS.items():
-            if os.path.isfile(os.path.join(path, fname)):
-                return tool
-        return None
-    return _SUFFIX_TOOLS.get(Path(path).suffix.lower())
+        tools = get_project_tools(path)
+        if not tools:
+            return None
+        folder_tool = get_tool_named(tools)
+        return "Quarto project" if folder_tool == "Quarto" else folder_tool
+    # MyST also builds from its config
+    if os.path.basename(path) == "myst.yml":
+        return "MyST"
+    suffix = Path(path).suffix.lower()
+    tool = _SUFFIX_TOOLS.get(suffix)
+    if suffix in (".md", ".ipynb"):
+        folder = os.path.dirname(os.path.abspath(path))
+        while True:
+            tools = get_project_tools(folder)
+            if tools:
+                return get_tool_named(tools)
+            parent = os.path.dirname(folder)
+            if parent == folder or os.path.isfile(
+                os.path.join(folder, "calkit.yaml")
+            ):
+                break
+            folder = parent
+    return tool
+
+
+def _resolve_quarto_or_myst(path: str) -> str:
+    """Get the tool for a document both Quarto and MyST projects could
+    build, from the pipeline stage building it, rather than guessing."""
+    import calkit.myst
+    import calkit.pipeline
+
+    project_dir, ck_info, found = calkit.pipeline.find_document_stages(
+        path, kinds=["quarto"], inside=os.path.isdir(path)
+    )
+    tools = set()
+    if found:
+        tools.add("Quarto project" if os.path.isdir(path) else "Quarto")
+    if project_dir is not None:
+        rel = Path(
+            os.path.relpath(os.path.abspath(path), project_dir)
+        ).as_posix()
+        if calkit.myst.get_build_stage(rel, ck_info, wdir=project_dir):
+            tools.add("MyST")
+    if len(tools) == 1:
+        return tools.pop()
+    raise_error(
+        f"Both Quarto and MyST could build {path}, and "
+        + ("stages for both do" if tools else "no stage says which")
+        + "; build it with 'calkit doc quarto render' or "
+        "'calkit doc myst build'"
+    )
 
 
 def _get_options(args: list[str]) -> list[str]:
@@ -133,13 +201,14 @@ def _run(
     from calkit.cli.export import export_app
     from calkit.cli.office import office_app
 
-    # Each tool's command for each verb; another tool, e.g., MyST, plugs in
-    # with its own rows
+    # Each tool's command for each verb; another tool plugs in with its own
+    # rows
     commands: dict[tuple[str, str], tuple[typer.Typer, str]] = {
         ("build", "LaTeX"): (latex_app, "build"),
         ("build", "Quarto"): (quarto_app, "render"),
         ("build", "Word"): (office_app, "word-to-pdf"),
         ("build", "PowerPoint"): (export_app, "pptx"),
+        ("build", "MyST"): (myst_app, "build"),
         ("diff", "LaTeX"): (latex_app, "diff"),
         ("to-docx", "LaTeX"): (latex_app, "to-docx"),
         ("merge-docx", "LaTeX"): (latex_app, "merge-docx"),
@@ -192,8 +261,11 @@ def build(
 
     A .tex file is built with `calkit doc latex build`, a Quarto document or
     notebook with `calkit doc quarto render`, a Word document with
-    `calkit office word-to-pdf`, and a PowerPoint deck to a PDF beside it
-    with `calkit export pptx`.
+    `calkit office word-to-pdf`, a PowerPoint deck to a PDF beside it
+    with `calkit export pptx`, and a MyST project, its myst.yml, or a
+    document in it with `calkit doc myst build`. Markdown and notebooks go
+    to the tool whose project they're in, and where both a Quarto and a
+    MyST project could build one, to the one whose stage does.
 
     A document a pipeline stage builds is built as that stage does, i.e.,
     in its environment and with its options, unless options for those are
@@ -209,6 +281,8 @@ def build(
 
     args = list(tool_args or [])
     tool = _get_tool(path)
+    if tool == _QUARTO_OR_MYST:
+        tool = _resolve_quarto_or_myst(path)
     if _wants_help(args):
         tool = "Quarto" if tool == "Quarto project" else tool
         _run(ctx, "build", path, [path] + args, tool=tool)
@@ -280,7 +354,7 @@ def build(
         a.startswith(("-o", "--output")) for a in options
     ):
         args += ["-o", Path(path).with_suffix(".pdf").as_posix()]
-    _run(ctx, "build", path, [path] + args)
+    _run(ctx, "build", path, [path] + args, tool=tool)
 
 
 @doc_app.command(name="diff", cls=_ToolArgsCommand)

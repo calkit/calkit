@@ -533,8 +533,8 @@ def stages_are_similar(stage1: dict, stage2: dict) -> bool:
     elif kind == "jupyter-notebook":
         if stage1.get("notebook_path") != stage2.get("notebook_path"):
             return False
-    # For latex and quarto
-    elif kind in ["latex", "quarto"]:
+    # For latex, quarto, and myst
+    elif kind in ["latex", "quarto", "myst"]:
         if stage1.get("target_path") != stage2.get("target_path"):
             return False
     # For command stages, check the command

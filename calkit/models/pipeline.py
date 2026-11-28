@@ -475,6 +475,7 @@ class Stage(Model):
         "python-script",
         "latex",
         "quarto",
+        "myst",
         "matlab-script",
         "matlab-command",
         "command",
@@ -2153,6 +2154,198 @@ class QuartoStage(Stage):
         )
         deps = [document] + super().dvc_deps
         for path in self._value_paths + self._embedded_paths:
+            path = self.path_from_wdir(path)
+            if path not in deps:
+                deps.append(path)
+        return deps
+
+
+class MystStage(Stage):
+    """A stage that builds a MyST project, or one document in it.
+
+    Its target is the project's folder, i.e., where its ``myst.yml`` is,
+    the ``myst.yml`` itself, or a document in the project, which builds
+    only that document's exports, as ``myst build`` does given a file.
+    It builds with ``calkit doc myst build``, which checks MyST comes from the
+    stage's environment, or is a declared requirement, and works out the
+    values its documents show and where what they show came from first.
+    Its documents, their ``myst.yml``, and the files they show or include
+    are found when the pipeline compiles, so they're inputs without being
+    listed, and Calkit's MyST plugin is written then too.
+
+    Its outputs are what ``myst build`` writes with its arguments, e.g.,
+    ``_build/site`` for a site, and its exports where ``myst.yml`` or a
+    document's front matter puts them, or ``_build/exports``, stored as
+    ``output_storage`` says, unless ``outputs`` lists others.
+    """
+
+    kind: Literal["myst"] = "myst"
+    target_path: str = Field(
+        description="Path to the MyST project's folder, its myst.yml, or a "
+        "document in it to build alone."
+    )
+    args: list[str] = Field(
+        default=[],
+        description="Extra arguments passed to 'myst build', e.g., "
+        "['--site'].",
+    )
+    output_storage: Literal["git", "dvc"] | None = Field(
+        default="dvc",
+        description="Where to store what it builds, unless outputs lists "
+        "what it builds.",
+    )
+
+    # The documents, their myst.yml, and the files they show or include,
+    # and what it builds, unless outputs says, relative to the project, set
+    # by preprocess
+    _document_paths: list[str] = PrivateAttr(default_factory=list)
+    _built_paths: list[str] = PrivateAttr(default_factory=list)
+
+    @property
+    def project_target_path(self) -> str:
+        """The target's path relative to the project."""
+        return posixpath.normpath(
+            posixpath.join(self.wdir or "", self.target_path)
+        )
+
+    @property
+    def allows_machine_myst(self) -> bool:
+        """Whether MyST from this machine is expected, as it is if the stage
+        requires it, or the project does, which ``calkit doc myst build`` reads
+        itself.
+        """
+        import calkit.environments
+
+        requirements = [
+            r.model_dump(exclude_none=True) if isinstance(r, BaseModel) else r
+            for r in self.requirements
+        ]
+        return calkit.environments.is_app_required(
+            "myst", {}, stage={"requirements": requirements}
+        )
+
+    def preprocess(
+        self,
+        project_dir: str | None,
+        is_output: Callable[[str], bool],
+        write_files: bool = False,
+        is_exact_output: Callable[[str], bool] | None = None,
+    ) -> None:
+        """Find the documents the project builds and the files they show or
+        include, since they're as much inputs as its ``myst.yml``, and with
+        ``write_files``, write Calkit's MyST plugin that shows them.
+
+        A malformed directive or role is left for ``calkit doc myst build`` to
+        report when the stage runs, rather than stopping the pipeline from
+        compiling.
+        """
+        import calkit
+        import calkit.myst
+        import calkit.quarto
+        from calkit.markdown import MarkdownParseError, results_by_name
+
+        def exists(p: str) -> bool:
+            return os.path.exists(os.path.join(project_dir or "", p))
+
+        def read_text(p: str) -> str | None:
+            return calkit.quarto.read_document_text(
+                os.path.join(project_dir or "", p)
+            )
+
+        self._document_paths = []
+        self._built_paths = []
+        myst_dir, document = calkit.myst.get_target_paths(
+            self.project_target_path, wdir=project_dir
+        )
+        if myst_dir is None:
+            return
+        if not self.outputs:
+            self._built_paths = calkit.myst.get_build_outputs(
+                myst_dir, document, self.args, wdir=project_dir
+            )
+        config_path = posixpath.normpath(posixpath.join(myst_dir, "myst.yml"))
+        # Except what it makes itself, e.g., its build folder
+        own_paths = [
+            posixpath.normpath(posixpath.join(self.wdir or "", p))
+            for p in self.dvc_out_paths
+        ]
+        paths = [config_path]
+        shows = False
+        try:
+            documents = (
+                [document]
+                if document is not None
+                else calkit.myst.find_documents(myst_dir, wdir=project_dir)
+            )
+            results = None
+            for document in documents:
+                paths.append(document)
+                text = read_text(document)
+                if text is None:
+                    continue
+                if results is None:
+                    ck_info = calkit.load_calkit_info(
+                        wdir=project_dir, read_only=True
+                    )
+                    results = results_by_name(ck_info)
+                components, roles, included = calkit.myst.extract_document(
+                    text, document, read_text=read_text, results=results
+                )
+                shows = shows or bool(components or roles)
+                paths += [c.path for c in components if c.path]
+                paths += [v.path for _, _, v in roles if not v.ref]
+                paths += included
+        except (MarkdownParseError, ValueError, OSError):
+            pass
+        self._document_paths = [
+            p
+            for p in dict.fromkeys(paths)
+            if not any(
+                p == o or p.startswith(o.rstrip("/") + "/") for o in own_paths
+            )
+            and (exists(p) or exists(p + ".dvc") or is_output(p))
+        ]
+        if write_files and shows:
+            calkit.myst.write_plugin(myst_dir, wdir=project_dir)
+
+    @property
+    def dvc_cmd(self) -> str:
+        # Dispatched to a job scheduler or another machine as other stages
+        # are, with 'calkit doc myst build' taking the place of the inner xenv;
+        # with no runtime to activate there, it builds as is
+        inner_xenv = f"calkit xenv -n {self.inner_environment} --no-check --"
+        prefix = self.xenv_cmd
+        environment = self.inner_environment
+        if prefix == inner_xenv:
+            prefix = ""
+        elif prefix.endswith(inner_xenv):
+            prefix = prefix[: -len(inner_xenv)].strip()
+        elif prefix:
+            environment = "_system"
+        args = ["-e", environment, "--no-check"]
+        if self.allows_machine_myst:
+            args.append("--allow-machine-myst")
+        args.append(self.target_path)
+        if self.args:
+            args += ["--"] + self.args
+        # Quoted for cmd.exe too, which DVC runs commands with on Windows
+        cmd = "calkit doc myst build " + " ".join(quote_arg(a) for a in args)
+        return f"{prefix} {cmd}".strip()
+
+    @property
+    def dvc_outs(self) -> list[str | dict]:
+        built: list[str | dict] = [
+            self.path_from_wdir(p)
+            if self.output_storage == "dvc"
+            else {self.path_from_wdir(p): {"cache": False}}
+            for p in self._built_paths
+        ]
+        return built + super().dvc_outs
+
+    @property
+    def dvc_deps(self) -> list[str]:
+        deps = super().dvc_deps
+        for path in self._document_paths:
             path = self.path_from_wdir(path)
             if path not in deps:
                 deps.append(path)
@@ -3843,6 +4036,7 @@ class Pipeline(Model):
                 PythonScriptStage
                 | LatexStage
                 | QuartoStage
+                | MystStage
                 | JsonToLatexStage
                 | QuestionsToLatexStage
                 | ReferencesCheckStage

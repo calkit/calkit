@@ -78,3 +78,11 @@ above it.
 
 See the [subprojects docs](https://docs.calkit.org/subprojects/)
 for more.
+
+<!-- TODO: needs human review -->
+
+## Starting a project from this example
+
+```sh
+calkit new project my-project --from calkit/calkit/examples/subprojects
+```

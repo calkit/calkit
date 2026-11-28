@@ -241,3 +241,11 @@ plotted 41 rows
 ```
 
 ![Damped oscillation plotted with ggplot2](figures/data2.png)
+
+<!-- TODO: needs human review -->
+
+## Starting a project from this example
+
+```sh
+calkit new project my-project --from calkit/calkit/examples/markdown
+```

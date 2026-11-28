@@ -25,6 +25,7 @@ from calkit.models.pipeline import (
     MarkdownStage,
     MatlabCommandStage,
     MatlabScriptStage,
+    MystStage,
     NotebookCellOutput,
     Pipeline,
     PptxExportStage,
@@ -709,6 +710,107 @@ def test_quartostage(tmp_path):
         "report.qmd",
         "../analysis.ipynb",
     ]
+
+
+def test_myststage(tmp_path):
+    from calkit.models.pipeline import Pipeline
+
+    # A project in a folder, showing a figure another stage makes, a
+    # results value, an included file, and a file it builds itself, plus a
+    # page showing nothing
+    site = tmp_path / "site"
+    (site / "_build").mkdir(parents=True)
+    (site / "myst.yml").write_text("version: 1\nproject: {}\n")
+    (site / "index.md").write_text(
+        ":::{ckfigure} figures/plot.svg\nThe plot.\n:::\n\n"
+        ":::{ckfigure} site/_build/logo.png\n:::\n\n"
+        "The slope is {ckvalue}`results/fit.json slope .2f`.\n\n"
+        "```{include} parts/intro.md\n```\n"
+    )
+    (site / "page.md").write_text("A page.\n")
+    (site / "parts").mkdir()
+    (site / "parts" / "intro.md").write_text("Hi.\n")
+    (tmp_path / "results").mkdir()
+    (tmp_path / "results" / "fit.json").write_text('{"slope": 1}')
+    (tmp_path / "calkit.yaml").write_text("{}\n")
+    plot = {
+        "kind": "python-script",
+        "environment": "py",
+        "script_path": "plot.py",
+        "outputs": ["figures/plot.svg"],
+    }
+    # Its folder, its myst.yml, or with a wdir, a document in it alone,
+    # building what its arguments say, unless its outputs say otherwise
+    for stage, cmd, expected, outs in [
+        (
+            {"target_path": "site", "outputs": ["site/_build/site"]},
+            "calkit doc myst build -e py --no-check site -- --site --ci",
+            [
+                "site/myst.yml",
+                "site/index.md",
+                "site/page.md",
+                "site/parts/intro.md",
+                "figures/plot.svg",
+                "results/fit.json",
+            ],
+            ["site/_build/site"],
+        ),
+        (
+            {"target_path": "site/myst.yml"},
+            "calkit doc myst build -e py --no-check site/myst.yml -- --site --ci",
+            ["site/myst.yml", "site/index.md", "site/page.md"],
+            ["site/_build/site"],
+        ),
+        (
+            {"wdir": "site", "target_path": "index.md"},
+            "calkit doc myst build -e py --no-check index.md -- --site --ci",
+            ["myst.yml", "index.md", "../figures/plot.svg"],
+            ["_build/site"],
+        ),
+    ]:
+        pipeline = Pipeline.model_validate(
+            {
+                "stages": {
+                    "plot": plot,
+                    "site": {
+                        "kind": "myst",
+                        "environment": "py",
+                        "args": ["--site", "--ci"],
+                        **stage,
+                    },
+                }
+            }
+        )
+        s = pipeline.stages["site"]
+        assert isinstance(s, MystStage)
+        assert s.dvc_cmd == cmd
+        # What it shows are inputs once compiled, except what it builds,
+        # and the plugin is written
+        pipeline.preprocess_stages(str(tmp_path), write_files=True)
+        deps = s.dvc_deps
+        for dep in expected:
+            assert dep in deps, (stage, dep)
+        assert not any("_build" in d for d in deps), stage
+        assert s.dvc_out_paths == outs, stage
+        assert ("site/page.md" in deps or "page.md" in deps) == (
+            "index.md" not in stage["target_path"]
+        )
+    assert (site / "_extensions" / "calkit" / "myst.mjs").is_file()
+    # What it builds can be kept in Git instead
+    s.output_storage = "git"
+    assert s.dvc_outs == [{"_build/site": {"cache": False}}]
+    # Outside a MyST project it finds nothing, and MyST from this machine
+    # is allowed if the stage requires it
+    s = MystStage(
+        environment="_system",
+        target_path="results",
+        requirements=["myst"],
+    )
+    s.preprocess(str(tmp_path), lambda p: False)
+    assert s.dvc_deps == super(MystStage, s).dvc_deps
+    assert s.dvc_cmd == (
+        "calkit doc myst build -e _system --no-check --allow-machine-myst results"
+    )
 
 
 def test_jupyternotebookstage():

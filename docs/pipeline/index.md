@@ -709,6 +709,33 @@ Model class: `MatlabScriptStage`
 | `script_path`           | str         | yes      |         | Path to the MATLAB script to run.                |
 | `matlab_path`           | str \| None | no       | null    | Directory added to the MATLAB path, recursively. |
 
+### `myst`
+
+Model class: `MystStage`
+
+A stage that builds a MyST project, or one document in it.
+
+Its target is the project's folder, i.e., where its `myst.yml` is,
+the `myst.yml` itself, or a document in the project, which builds
+only that document's exports, as `myst build` does given a file.
+It builds with `calkit doc myst build`, which checks MyST comes from the
+stage's environment, or is a declared requirement, and works out the
+values its documents show and where what they show came from first.
+Its documents, their `myst.yml`, and the files they show or include
+are found when the pipeline compiles, so they're inputs without being
+listed, and Calkit's MyST plugin is written then too.
+
+Its outputs are what `myst build` writes with its arguments, e.g.,
+`_build/site` for a site, and its exports where `myst.yml` or a
+document's front matter puts them, or `_build/exports`, stored as
+`output_storage` says, unless `outputs` lists others.
+
+| Kind-specific parameter | Type                          | Required | Default | Description                                                                          |
+| ----------------------- | ----------------------------- | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `target_path`           | str                           | yes      |         | Path to the MyST project's folder, its myst.yml, or a document in it to build alone. |
+| `args`                  | list[str]                     | no       |         | Extra arguments passed to 'myst build', e.g., ['--site'].                            |
+| `output_storage`        | Literal['git', 'dvc'] \| None | no       | 'dvc'   | Where to store what it builds, unless outputs lists what it builds.                  |
+
 ### `procedure`
 
 Model class: `ProcedureStage`

@@ -1,0 +1,352 @@
+"""Tests for ``calkit.myst``."""
+
+import json
+from pathlib import Path
+
+import pytest
+
+import calkit
+import calkit.myst
+from calkit.markdown import MarkdownParseError
+
+
+def test_directives(tmp_path: Path) -> None:
+    # Components are found with colons or backticks, outside code and
+    # literal directives, whose closing fences don't open code blocks, named
+    # by their directive, with a path relative to the project and options
+    # as lines or a YAML block
+    text = (
+        ":::{ckfigure} figures/plot.svg\n"
+        ":label: fig-plot\n:width: 50%\nThe plot.\n:::\n"
+        "```python\n:::{ckfigure} in-code.png\n```\n"
+        "```{note}\nA note.\n```\n"
+        "```{cktable} data/clean.csv\n:name: tbl-data\n:rows: 2\n```\n"
+        "```{code-cell} python\n:::{ckfigure} in-cell.png\n:::\n```\n"
+        "~~~\n:::{ckfigure} in-tilde.png\n~~~\n"
+        "::::{ckinclude} notes.md\n---\nprovenance: false\nrows: many\n---\n::::\n"
+        ":::{figure} other.png\n:::\n"
+        ":::{ckfigure}\n:::\n"
+        "The slope is {ckvalue}`results/fit.json fit.slope .2f` and k is "
+        "{ckvalue}`fit.ipynb k_25 provenance=false`, quoting "
+        "{ckrefval}`liu2025 sigma`.\n"
+        "```\n{ckvalue}`in-code.json x`\n```\n"
+        ":::{include} part.md\n:::\n"
+    )
+    parts = {
+        "site/pages/part.md": (
+            ":::{cktable} inc.csv\n:::\n{ckvalue}`metrics n`\n"
+            ":::{include} part.md\n:::\n:::{include} index.md\n:::\n"
+        ),
+        "site/pages/index.md": text,
+    }
+    components, roles, included = calkit.myst.extract_document(
+        text,
+        "site/pages/index.md",
+        read_text=parts.get,
+        results={"metrics": "results/metrics.yaml"},
+    )
+    assert [
+        (c.kind, c.src, c.path, c.label, c.line, c.rows, c.provenance)
+        for c in components
+    ] == [
+        (
+            "figure",
+            "figures/plot.svg",
+            "figures/plot.svg",
+            "fig-plot",
+            1,
+            25,
+            True,
+        ),
+        ("table", "data/clean.csv", "data/clean.csv", "tbl-data", 12, 2, True),
+        ("include", "notes.md", "notes.md", "", 23, 25, False),
+        # Included, once, however files include each other
+        ("table", "inc.csv", "inc.csv", "", 1, 25, True),
+    ]
+    # Values from roles read as Quarto's shortcodes do, with their role and
+    # content, as the plugin finds them, from what's included too
+    assert [
+        (name, args, v.path, v.key, v.format, v.ref, v.provenance, v.line)
+        for name, args, v in roles
+    ] == [
+        (
+            "ckvalue",
+            "results/fit.json fit.slope .2f",
+            "results/fit.json",
+            "fit.slope",
+            ".2f",
+            None,
+            True,
+            33,
+        ),
+        (
+            "ckvalue",
+            "fit.ipynb k_25 provenance=false",
+            ".calkit/notebooks/outputs/fit.ipynb/values.json",
+            "k_25",
+            None,
+            None,
+            False,
+            33,
+        ),
+        (
+            "ckrefval",
+            "liu2025 sigma",
+            ".calkit/reference-values/liu2025.json",
+            "sigma",
+            None,
+            ("liu2025", "sigma"),
+            True,
+            33,
+        ),
+        (
+            "ckvalue",
+            "metrics n",
+            "results/metrics.yaml",
+            "n",
+            None,
+            None,
+            True,
+            3,
+        ),
+    ]
+    assert included == ["site/pages/part.md"]
+    # Roles aren't read in inline code, comments, or what's included
+    # literally, but are in a directive's argument, and include nested in
+    # what's included is relative to the file including it, as is Markdown
+    # a ckinclude shows
+    text = (
+        "Code ``{ckvalue}`results/x.json key` `` and `plain`.\n"
+        "% {ckvalue}`results/comment.json k`\n"
+        "<!-- {ckvalue}`results/html.json k`\nstill a comment -->\n"
+        ":::{admonition} Slope is {ckvalue}`results/fit.json b`\n:::\n"
+        ":::{include} notes.md\n:literal: true\n:::\n"
+        ":::{include} notes.md\n:literal:\n:::\n"
+        ":::{include} parts\\a.md\n---\nliteral: false\n---\n:::\n"
+        ":::{ckinclude} notes/n.md\n:::\n"
+    )
+    parts = {
+        "site/parts/a.md": ":::{include} b.md\n:::\n",
+        "site/parts/b.md": "B {ckvalue}`results/fit.json c`\n",
+        "site/notes.md": "{ckvalue}`results/literal.json k`\n",
+        "notes/n.md": "N {ckvalue}`results/fit.json d`\n",
+    }
+    found, found_roles, included = calkit.myst.extract_document(
+        text, "site/index.md", read_text=parts.get
+    )
+    assert [args for _, args, _ in found_roles] == [
+        "results/fit.json b",
+        "results/fit.json c",
+        "results/fit.json d",
+    ]
+    assert included == ["site/parts/a.md", "site/parts/b.md", "notes/n.md"]
+    assert [(c.kind, c.path) for c in found] == [("include", "notes/n.md")]
+    # A mistake in one names its line
+    with pytest.raises(MarkdownParseError, match="names no key") as e:
+        calkit.myst.extract_document("\n{ckvalue}`a.json`\n", "site/index.md")
+    assert e.value.line == 2
+    # Documents are found as MyST finds them without a toc: in the
+    # project's folder, but not what's built or installed there
+    (tmp_path / "site" / "pages").mkdir(parents=True)
+    (tmp_path / "site" / "_parts").mkdir(parents=True)
+    (tmp_path / "site" / "_build" / "site").mkdir(parents=True)
+    (tmp_path / "site" / "node_modules").mkdir()
+    (tmp_path / "site" / ".hidden").mkdir()
+    for name in [
+        "index.md",
+        "pages/a.ipynb",
+        "pages/b.md",
+        "pages/draft.md",
+        "_parts/part.md",
+        "notes.txt",
+        "_build/site/c.md",
+        "node_modules/d.md",
+        ".hidden/e.md",
+    ]:
+        (tmp_path / "site" / name).write_text("")
+    assert calkit.myst.find_documents("site", wdir=str(tmp_path)) == [
+        "site/index.md",
+        "site/_parts/part.md",
+        "site/pages/a.ipynb",
+        "site/pages/b.md",
+        "site/pages/draft.md",
+    ]
+    # Without what it excludes, or else as its toc lists them
+    (tmp_path / "site" / "myst.yml").write_text(
+        "project:\n  exclude:\n    - pages/draft.md\n    - _parts\n"
+    )
+    assert calkit.myst.find_documents("site", wdir=str(tmp_path)) == [
+        "site/index.md",
+        "site/pages/a.ipynb",
+        "site/pages/b.md",
+    ]
+    (tmp_path / "site" / "myst.yml").write_text(
+        "project:\n  toc:\n    - file: index\n    - title: Pages\n"
+        "      children:\n        - pattern: pages/*.md\n"
+        "  exclude: [pages/draft.md]\n"
+    )
+    assert calkit.myst.find_documents("site", wdir=str(tmp_path)) == [
+        "site/index.md",
+        "site/pages/b.md",
+    ]
+    (tmp_path / "site" / "myst.yml").unlink()
+    # The plugin has to be listed in myst.yml, which says how otherwise
+    for config, ok in [
+        (None, False),
+        ("version: 1\nproject:\n  title: T\n", False),
+        ("project:\n  plugins:\n    - other.mjs\n", False),
+        ("project:\n  plugins:\n    - ./_extensions/calkit/myst.mjs\n", True),
+        (
+            "project:\n  plugins:\n    - type: javascript\n"
+            "      path: _extensions/calkit/myst.mjs\n",
+            True,
+        ),
+    ]:
+        if config is not None:
+            (tmp_path / "site" / "myst.yml").write_text(config)
+        problem = calkit.myst.get_plugin_problem("site", wdir=str(tmp_path))
+        assert (problem is None) == ok, config
+        if problem is not None:
+            assert calkit.myst.PLUGIN_CONFIG in problem
+            assert "site/myst.yml" in problem
+    calkit.myst.write_plugin("site", wdir=str(tmp_path))
+    # What roles show is added to the record by their role and content
+    record_path = tmp_path / "record.json"
+    record_path.write_text(json.dumps({"values": {}}))
+    calkit.myst.add_role_values(str(record_path), roles[:2], ["0.12", "0.031"])
+    assert json.loads(record_path.read_text(encoding="utf-8"))["roles"] == {
+        "ckvalue": {
+            "results/fit.json fit.slope .2f": {
+                "text": "0.12",
+                "key": "results/fit.json:fit.slope",
+                "path": "results/fit.json",
+                "provenance": True,
+            },
+            "fit.ipynb k_25 provenance=false": {
+                "text": "0.031",
+                "key": ".calkit/notebooks/outputs/fit.ipynb/values.json:k_25",
+                "path": ".calkit/notebooks/outputs/fit.ipynb/values.json",
+                "provenance": False,
+            },
+        }
+    }
+    plugin_path = tmp_path / "site" / calkit.myst.PLUGIN_PATH
+    assert plugin_path.read_text(encoding="utf-8") == calkit.myst.PLUGIN_JS
+    css_path = tmp_path / "site" / calkit.myst.PLUGIN_CSS_PATH
+    assert css_path.read_text(encoding="utf-8") == calkit.myst.PLUGIN_CSS
+    # What a build writes: the site, as myst.yml defines one, and exports
+    # where they're declared, or by default, for the formats given
+    (tmp_path / "book").mkdir()
+    (tmp_path / "book" / "myst.yml").write_text(
+        "version: 1\nproject:\n  exports:\n"
+        "    - format: md\n      output: out/project.md\nsite: {}\n"
+    )
+    (tmp_path / "book" / "index.md").write_text(
+        "---\nexports:\n  - format: pdf\n---\n# Hi\n"
+    )
+    (tmp_path / "book" / "two.md").write_text("# Two\n")
+    (tmp_path / "book" / "three.md").write_text(
+        "---\nexports:\n  - format: pdf\n    output: paper.pdf\n---\n"
+    )
+    site, html = "book/_build/site", "book/_build/html"
+    exports, project_md = "book/_build/exports", "book/out/project.md"
+    for document, args, expected in [
+        (None, [], [site]),
+        (None, ["--site", "--ci"], [site]),
+        (None, ["--html"], [html]),
+        (None, ["--md"], [project_md]),
+        (None, ["--pdf"], ["book/paper.pdf", exports]),
+        (None, ["--all"], [site, project_md, "book/paper.pdf", exports]),
+        ("book/index.md", [], [exports]),
+        ("book/two.md", [], []),
+        ("book/two.md", ["--md"], [exports]),
+        ("book/index.md", ["--pdf"], [exports]),
+        ("book/three.md", ["--pdf"], ["book/paper.pdf"]),
+        ("book/three.md", ["--pdf", "--md"], ["book/paper.pdf", exports]),
+    ]:
+        assert (
+            calkit.myst.get_build_outputs(
+                "book", document, args, wdir=str(tmp_path)
+            )
+            == expected
+        ), (document, args)
+    (tmp_path / "book" / "myst.yml").write_text("version: 1\n")
+    assert calkit.myst.get_build_outputs("book", None, [], str(tmp_path)) == []
+    # A target is a project's folder, its myst.yml, or a document in it,
+    # whose project is the nearest folder above with a myst.yml
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "elsewhere" / "myst.yml").write_text("version: 1\n")
+    root = str(tmp_path)
+    for target, expected in [
+        ("site", ("site", None)),
+        ("site/", ("site", None)),
+        ("site/myst.yml", ("site", None)),
+        ("site/index.md", ("site", "site/index.md")),
+        ("site/pages/b.md", ("site", "site/pages/b.md")),
+        ("site\\pages\\b.md", ("site", "site/pages/b.md")),
+        ("notes.md", (None, "notes.md")),
+        ("site/pages", (None, None)),
+    ]:
+        assert calkit.myst.get_target_paths(target, wdir=root) == expected
+    # The stage that builds it is a myst stage building it, or else its
+    # whole project, or else one running 'calkit doc myst build' from its
+    # folder
+    stages: dict = {
+        "plot": {"kind": "python-script", "script_path": "p.py"},
+        "other": {
+            "kind": "command",
+            "command": "calkit document myst build . -e _system",
+            "wdir": "elsewhere",
+        },
+        "site": {
+            "kind": "command",
+            "command": "calkit doc myst build . -e _system -- --html",
+            "wdir": "site/",
+        },
+        "root": {"kind": "command", "command": "calkit myst build ."},
+    }
+    ck_info = {"pipeline": {"stages": stages}}
+    assert calkit.myst.get_build_stage("site", ck_info, wdir=root) == "site"
+    assert calkit.myst.get_build_stage("elsewhere", ck_info, root) == "other"
+    assert calkit.myst.get_build_stage("site/pages", ck_info, root) is None
+    stages["site-myst"] = {
+        "kind": "myst",
+        "environment": "e",
+        "target_path": "site/myst.yml",
+    }
+    stages["page"] = {
+        "kind": "myst",
+        "environment": "e",
+        "wdir": "site",
+        "target_path": "pages/b.md",
+    }
+    for target, expected in [
+        ("site", "site-myst"),
+        ("site/index.md", "site-myst"),
+        ("site/pages/b.md", "page"),
+    ]:
+        assert calkit.myst.get_build_stage(target, ck_info, root) == expected
+    del stages["site-myst"], stages["page"]
+    # What it shows has to be among its inputs, or in one, unless it makes
+    # it, for it to rebuild when that changes
+    paths = ["figures/plot.svg", "data/a.csv", "site/_build/x.png", "b.csv"]
+    assert calkit.myst.get_unlisted_paths(paths, "site", str(tmp_path)) == []
+    with open(tmp_path / "dvc.yaml", "w") as f:
+        calkit.ryaml.dump(
+            {
+                "stages": {
+                    "site": {
+                        "wdir": "site",
+                        "deps": ["index.md", "../figures/plot.svg", "../data"],
+                        "outs": [{"_build": {"cache": False}}],
+                    }
+                }
+            },
+            f,
+        )
+    # And exists or another stage makes it, since otherwise it can't be
+    (tmp_path / "b.csv").write_text("")
+    assert calkit.myst.get_unlisted_paths(
+        paths + ["b.csv", "gone.csv"], "site", str(tmp_path)
+    ) == ["b.csv"]
+    assert calkit.myst.get_unlisted_paths(paths, "other", str(tmp_path)) == []

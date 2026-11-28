@@ -125,6 +125,7 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         "merge-docx",
         "latex|tex",
         "quarto",
+        "myst",
     ]:
         assert name in doc_help
     # Subgroups under doc work alongside the hidden top-level aliases
@@ -162,7 +163,7 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     Path("notes.txt").write_text("Hi\n")
     for args, expected_text in [
         (["doc", "build", "notes.md"], "build not supported for Markdown yet"),
-        (["doc", "build", "site"], "build not supported for MyST yet"),
+        (["doc", "build", "site"], "Name the environment to build in"),
         (["doc", "build", "book"], "No quarto stage renders a document in"),
         (["doc", "build", "missing.tex"], "missing.tex doesn't exist"),
         (["doc", "build", "notes.txt"], "folder with _quarto.yml"),
@@ -171,6 +172,88 @@ def test_build(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         result = CliRunner().invoke(app, args)
         assert result.exit_code != 0, args
         assert expected_text in click.unstyle(result.output), args
+        assert os.path.samefile(os.getcwd(), tmp_path), args
+    # A MyST project builds from its folder, with 'myst build''s options
+    result = CliRunner().invoke(app, ["doc", "build", "site", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "--allow-machine-myst" in click.unstyle(result.output)
+    # Or as its myst stage does, from anywhere, with what's after '--'
+    # after the stage's arguments
+    calkit.save_calkit_info(
+        {
+            "name": "test",
+            "pipeline": {
+                "stages": {
+                    "site": {
+                        "kind": "myst",
+                        "environment": "_system",
+                        "target_path": "site",
+                        "args": ["--site"],
+                        "requirements": ["myst"],
+                    }
+                }
+            },
+        }
+    )
+    # Markdown in a MyST project is built alone, or as its project's stage
+    # does, by its myst.yml too
+    Path("site/page.md").write_text("A page.\n")
+    os.makedirs("sub")
+    monkeypatch.chdir("sub")
+    for args, expected in [
+        (["../site", "--", "--ci"], ["build", "--site", "--ci"]),
+        (["../site/myst.yml"], ["build", "--site"]),
+        (["../site/page.md"], ["build", "page.md", "--site"]),
+    ]:
+        calls.clear()
+        result = CliRunner().invoke(app, ["doc", "build", *args])
+        assert result.exit_code == 0, (args, result.output)
+        assert calls == [("quarto", expected)], args
+        assert os.path.samefile(os.getcwd(), tmp_path / "sub")
+    # Markdown and notebooks are the tool's whose project they're in, and
+    # in a folder with both, a stage's, rather than either guessing
+    Path("../book/ch1.md").write_text("# One\n")
+    Path("../site/nb.ipynb").write_text("{}\n")
+    os.makedirs("../dual")
+    Path("../dual/_quarto.yml").write_text("project: {}\n")
+    Path("../dual/myst.yml").write_text("version: 1\n")
+    Path("../dual/a.md").write_text("A.\n")
+    for args, expected in [
+        (
+            ["../book/ch1.md", "-e", "_system", "--allow-machine-quarto"],
+            ["render", "../book/ch1.md"],
+        ),
+        (["../site/nb.ipynb"], ["build", "nb.ipynb", "--site"]),
+    ]:
+        calls.clear()
+        result = CliRunner().invoke(app, ["doc", "build", *args])
+        assert result.exit_code == 0, (args, result.output)
+        assert calls == [("quarto", expected)], args
+    result = CliRunner().invoke(app, ["doc", "build", "../dual/a.md"])
+    assert result.exit_code != 0
+    assert "no stage says which" in click.unstyle(result.output)
+    info = calkit.load_calkit_info(wdir=str(tmp_path))
+    stages = info["pipeline"]["stages"]
+    stages["dual"] = {
+        "kind": "myst",
+        "environment": "_system",
+        "target_path": "dual",
+        "requirements": ["myst"],
+    }
+    calkit.save_calkit_info(info, wdir=str(tmp_path))
+    calls.clear()
+    result = CliRunner().invoke(app, ["doc", "build", "../dual/a.md"])
+    assert result.exit_code == 0, result.output
+    assert calls == [("quarto", ["build", "a.md"])]
+    stages["dual-quarto"] = {
+        "kind": "quarto",
+        "environment": "_system",
+        "target_path": "dual/a.md",
+    }
+    calkit.save_calkit_info(info, wdir=str(tmp_path))
+    result = CliRunner().invoke(app, ["doc", "build", "../dual/a.md"])
+    assert result.exit_code != 0
+    assert "stages for both do" in click.unstyle(result.output)
 
 
 def test_build_as_stage(

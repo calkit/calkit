@@ -1122,6 +1122,8 @@ def get_gated_stages(
     # Each requirement checked here, so one many stages share is checked once
     if checked is None:
         checked = {}
+    # Which apply wherever a stage runs here
+    project_requirements = calkit.get_requirements(ck_info)
     # What each switch picks, resolved once
     picks: dict[str, str | None] = {}
     # The apps that can export each kind
@@ -1441,31 +1443,29 @@ def get_gated_stages(
                 )
         # The apps its environments are built with, e.g., Conda, are offered
         # like declared requirements, but lacking one is something wrong
-        # rather than the project saying the stage can't run here
+        # rather than the project saying the stage can't run here, so it's
+        # the reason only if nothing else, e.g., a lock, is
         implied_reason = None
-        # An inner env is built here unless the stage is sent to its machine
-        built_here = (
-            machine_name is None
-            or stage.get("kind") not in envs_mod.STAGE_KINDS_SENT_TO_OUTER_ENV
-        )
-        if (reason is None or unmet is not None) and built_here:
-            # Those declared for here, where the stage's own are only when
-            # it runs here too
-            declared = list(calkit.get_requirements(ck_info))
-            if machine_name is None:
-                declared += requirements
+        if reason is None or unmet is not None:
             implied = envs_mod.get_implied_requirements(
-                [env for _, env in resolved], declared
+                stage, resolved, project_requirements
             )
-            if implied:
-                implied_reason, _ = check(
-                    ["requirements", None, implied],
-                    lambda: requirements_problem(implied, None, {}),
+            implied_apps = list(dict.fromkeys(implied.values()))
+            if implied_apps and (
+                check(
+                    ["requirements", None, implied_apps],
+                    lambda: requirements_problem(implied_apps, None, {}),
+                )[0]
+                is not None
+            ):
+                unmet = (unmet or []) + implied_apps
+                implied_reason = "; ".join(
+                    f"environment '{env_name}' is built with {app}, which "
+                    "isn't installed"
+                    for env_name, app in implied.items()
+                    if checked.get(calkit.get_requirement_key(app))
                 )
-            if implied_reason is not None:
-                unmet = (unmet or []) + implied
-                if reason is None:
-                    reason, is_error = implied_reason, True
+                implied_reason += f"; {REQUIREMENTS_FIX_HINT}"
         # Locks are checked for a stage that only lacks requirements too,
         # since meeting them wouldn't let it run if a lock rules it out
         wants_unmet = unmet is not None and requirements_by_stage is not None
@@ -1482,9 +1482,11 @@ def get_gated_stages(
                 )
                 if lock_reason is not None:
                     unmet = None
-                    if reason is None or reason == implied_reason:
+                    if reason is None:
                         reason, is_error = lock_reason, lock_is_error
                     break
+        if reason is None and implied_reason is not None:
+            reason, is_error = implied_reason, True
         if unmet is not None and requirements_by_stage is not None:
             requirements_by_stage[name] = unmet
         if reason is not None:

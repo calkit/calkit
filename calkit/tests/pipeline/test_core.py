@@ -8,6 +8,7 @@ import subprocess
 import sys
 import warnings
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 import git
@@ -5303,12 +5304,25 @@ def test_get_gated_stages(tmp_dir, monkeypatch, capsys):
 
 
 def test_get_gated_stages_for_apps_environments_are_built_with(
-    tmp_dir, monkeypatch, capsys
-):
+    tmp_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     import calkit.conda
+    import calkit.core
 
     monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: None)
     monkeypatch.setattr(calkit.conda, "find_mamba_exe", lambda: None)
+    # Each of these is here unless hidden, whatever this machine has
+    hidden = {"pixi", "julia", "juliaup"}
+    check_dep_exists = calkit.core.check_dep_exists
+
+    def fake_check_dep_exists(name: str, *args: Any, **kwargs: Any) -> bool:
+        if name in ("pixi", "julia", "juliaup", "uv"):
+            return name not in hidden
+        return check_dep_exists(name, *args, **kwargs)
+
+    monkeypatch.setattr(calkit.core, "check_dep_exists", fake_check_dep_exists)
     monkeypatch.delenv("CK_TEST_TOKEN", raising=False)
     token = {"kind": "env-var", "name": "CK_TEST_TOKEN"}
 
@@ -5323,6 +5337,8 @@ def test_get_gated_stages_for_apps_environments_are_built_with(
         "environments": {
             "py": {"kind": "conda", "path": "environment.yml"},
             "uv-env": {"kind": "uv-venv", "path": "requirements.txt"},
+            "px": {"kind": "pixi", "path": "pixi.toml"},
+            "jl": {"kind": "julia", "path": "Project.toml", "julia": "1.11"},
             "pinned": {"kind": "system", "lock": ["hostname"]},
             "far": {"kind": "system", "host": "calkit-test.invalid"},
         },
@@ -5333,6 +5349,10 @@ def test_get_gated_stages_for_apps_environments_are_built_with(
                     "_system", inputs=[{"from_stage_outputs": "py-stage"}]
                 ),
                 "uv-stage": make_stage("uv-env"),
+                "pixi-stage": make_stage("px"),
+                "julia-stage": make_stage("jl"),
+                # Declared by the name of the same installer
+                "juliaup-stage": make_stage("jl", requirements=["juliaup"]),
                 "token-stage": make_stage("py", requirements=[token]),
                 "pinned-py": make_stage("pinned:py"),
                 "far-py": make_stage("far:py"),
@@ -5364,20 +5384,36 @@ def test_get_gated_stages_for_apps_environments_are_built_with(
     assert "App 'conda' is not installed" in capsys.readouterr().err
     # Lacking the app an environment is built with is something wrong, not
     # the project saying the stage can't run here, but it's offered the same
-    assert set(errors) == {"py-stage", "after", "far-nb"}
+    assert set(errors) == {
+        "py-stage",
+        "after",
+        "pixi-stage",
+        "julia-stage",
+        "far-nb",
+    }
+    hint = calkit.pipeline.REQUIREMENTS_FIX_HINT
     assert errors["py-stage"] == (
-        "app 'conda' not found on this machine; 'calkit check reqs --stale' "
-        "offers to install or set up what's missing"
+        f"environment 'py' is built with conda, which isn't installed; {hint}"
+    )
+    assert errors["pixi-stage"].startswith(
+        "environment 'px' is built with pixi, which isn't installed"
+    )
+    assert errors["julia-stage"].startswith(
+        "environment 'jl' is built with julia, which isn't installed"
     )
     assert blocked_by == {"after": {"py-stage"}}
     # One the project says can't run here is still skipped for that, and
     # offered the app too, but not one locked to another machine, nor is
     # one on another machine held up by this one
-    assert set(gated) == {"token-stage", "pinned-py"}
+    assert set(gated) == {"token-stage", "juliaup-stage", "pinned-py"}
     assert "CK_TEST_TOKEN" in gated["token-stage"]
+    assert "juliaup" in gated["juliaup-stage"]
     assert "locked to another machine" in gated["pinned-py"]
     assert by_requirements == {
         "py-stage": ["conda"],
+        "pixi-stage": ["pixi"],
+        "julia-stage": ["julia"],
+        "juliaup-stage": ["juliaup"],
         "token-stage": [token, "conda"],
         "far-nb": ["conda"],
     }
@@ -5408,7 +5444,25 @@ def test_get_gated_stages_for_apps_environments_are_built_with(
     assert set(gated) == {"token-stage"} and set(errors) == {"py-stage"}
     assert by_requirements == {"token-stage": [conda], "py-stage": ["conda"]}
     del ck_info["environments"]["far"]["requirements"]
-    # Once it's here, nothing's skipped for it
+    # A script's own environment needs uv
+    with open("script.py", "w") as f:
+        f.write("# /// script\n# requires-python = '>=3.10'\n# ///\n")
+    ck_info["pipeline"]["stages"]["script"] = {
+        "kind": "python-script",
+        "script_path": "script.py",
+    }
+    hidden.add("uv")
+    gated, errors = calkit.pipeline.get_gated_stages(
+        ck_info, stage_names=["script"], interactive=False, system_info={}
+    )
+    assert gated == {} and errors == {
+        "script": (
+            "environment 'script.py' is built with uv, which isn't "
+            f"installed; {hint}"
+        )
+    }
+    # Once they're here, nothing's skipped for them
+    hidden.clear()
     monkeypatch.setattr(calkit.conda, "find_conda_exe", lambda: sys.executable)
     del ck_info["pipeline"]["stages"]["token-stage"]
     gated, errors = calkit.pipeline.get_gated_stages(

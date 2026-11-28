@@ -372,21 +372,28 @@ so `word` and `libreoffice` work as app requirements.
 A stage needs the app its environments are built with on the machine
 where it runs, so that app is a requirement without being declared:
 
-| Environment kind | App       |
-| ---------------- | --------- |
-| `conda`          | `conda`   |
-| `uv`, `uv-venv`  | `uv`      |
-| `pixi`           | `pixi`    |
-| `julia`          | `julia`   |
-| `renv`           | `Rscript` |
-| `nix`            | `nix`     |
+| Environment kind                                                 | App       |
+| ---------------------------------------------------------------- | --------- |
+| `conda`                                                          | `conda`   |
+| `uv`, `uv-venv`                                                  | `uv`      |
+| [A script's own](environments.md#scripts-that-declare-their-own) | `uv`      |
+| `pixi`                                                           | `pixi`    |
+| `julia`                                                          | `julia`   |
+| `renv`                                                           | `Rscript` |
+| `nix`                                                            | `nix`     |
 
 If one of these is declared where the stage runs, i.e., in the
-project's requirements, the stage's, or those of a machine environment
-it runs on here, e.g., with a `version_spec` or `setup_command`,
+project's requirements, or, unless the stage runs on another machine,
+in its own or those of its environments,
+e.g., with a `version_spec` or `setup_command`,
 that's what's checked instead.
-Docker isn't on the list, since Calkit offers to install or start it when
-an environment needs it.
+One declared by another name for the same installer counts too,
+e.g., `R` for `Rscript` or `juliaup` for `julia`.
+`calkit run` and `calkit check reqs` count declarations the same way,
+so one on another stage doesn't count.
+Docker isn't on the list, since `calkit run` offers to install or start
+it when an environment needs it, so `calkit check reqs` doesn't check it
+for Docker or MATLAB environments.
 Lacking one of these isn't the project saying a stage can't run here, so
 on a terminal `calkit run` offers to
 [install](#auto-installing-apps) it.
@@ -394,6 +401,14 @@ Otherwise, it prints the install command and skips the stage,
 and if the stage is out of date, the run fails.
 `calkit check reqs` checks them too, except for an environment only
 used on another machine.
+
+Without a terminal, where an app is declared changes what a run on a
+machine without it does, e.g., for Conda:
+declared in the project's requirements, it stops the run before any
+stage runs;
+declared in a stage's, that stage is skipped as one that can't run here;
+and not declared, the stage is skipped too, but the run fails if the
+stage is out of date.
 
 ## Pinning the Calkit CLI version
 

@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from pprint import pprint
+from typing import Any
 from unittest.mock import Mock, patch
 
 import click
@@ -5160,7 +5161,7 @@ def test_run_offers_apps_environments_are_built_with(
     subprocess.check_call(["calkit", "init"])
     with open("requirements.txt", "w") as f:
         f.write("")
-    ck_info = {
+    ck_info: dict = {
         "environments": {
             "py": {"kind": "uv-venv", "path": "requirements.txt"},
         },
@@ -5181,12 +5182,12 @@ def test_run_offers_apps_environments_are_built_with(
     installed: list[str] = []
     check_dep_exists = calkit.core.check_dep_exists
 
-    def fake_check_dep_exists(name: str, *args, **kwargs) -> bool:
+    def fake_check_dep_exists(name: str, *args: Any, **kwargs: Any) -> bool:
         if name == "uv":
             return "uv" in installed
         return check_dep_exists(name, *args, **kwargs)
 
-    def fake_install(app: str, **kwargs) -> bool:
+    def fake_install(app: str, **kwargs: Any) -> bool:
         installed.append(app)
         return True
 
@@ -5201,8 +5202,8 @@ def test_run_offers_apps_environments_are_built_with(
     assert "App 'uv' is not installed" in res.output
     assert "An installer is available" in res.output
     assert (
-        "Stage 'a' is out of date and couldn't run: app 'uv' not found on "
-        "this machine"
+        "Stage 'a' is out of date and couldn't run: environment 'py' is "
+        "built with uv, which isn't installed"
     ) in res.output
     assert "Run this to install" not in res.output
     # On a terminal it's offered, and declining still fails
@@ -5219,6 +5220,23 @@ def test_run_offers_apps_environments_are_built_with(
     assert installed == ["uv"]
     with open("a.txt") as f:
         assert f.read().strip() == "a"
+    # One the project says needs it is still an expected skip, though
+    # another, which is up to date, needs it for its environment
+    installed.clear()
+    ck_info["pipeline"]["stages"]["x"] = {
+        "kind": "shell-command",
+        "command": "echo x > x.txt",
+        "environment": "_system",
+        "requirements": ["uv"],
+        "outputs": [{"path": "x.txt", "storage": "git"}],
+    }
+    with open("calkit.yaml", "w") as f:
+        calkit.ryaml.dump(ck_info, f)
+    monkeypatch.setattr(calkit.core, "is_tty", lambda: False)
+    res = runner.invoke(calkit_app, ["run"])
+    assert res.exit_code == 0, res.output
+    assert "couldn't run" not in res.output
+    assert not os.path.exists("x.txt")
 
 
 def test_run_reruns_when_an_env_var_input_changes(tmp_dir):

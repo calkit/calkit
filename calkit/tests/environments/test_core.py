@@ -3112,38 +3112,71 @@ def test_check_all_in_pipeline_quiet(tmp_dir, monkeypatch, capfd):
     assert "line 29" in capfd.readouterr().out
 
 
-def test_get_implied_requirements():
-    envs = [
-        {"kind": "conda", "path": "environment.yml"},
-        {"kind": "uv", "path": "pyproject.toml"},
-        {"kind": "uv-venv", "path": "requirements.txt"},
-        {"kind": "pixi", "path": "pixi.toml"},
-        {"kind": "julia", "path": "Project.toml", "julia": "1.11"},
-        {"kind": "renv", "path": "DESCRIPTION"},
-        {"kind": "nix", "path": "flake.nix"},
-        {"kind": "docker", "image": "ubuntu"},
-        {"kind": "matlab", "version": "R2024a"},
-        {"kind": "system"},
-        {"kind": "slurm"},
-        {"kind": "venv", "path": "requirements.txt"},
-    ]
+def test_get_implied_requirements() -> None:
+    envs: dict[str, dict] = {
+        "conda": {"kind": "conda", "path": "environment.yml"},
+        "uv": {"kind": "uv", "path": "pyproject.toml"},
+        "uv-venv": {"kind": "uv-venv", "path": "requirements.txt"},
+        "pixi": {"kind": "pixi", "path": "pixi.toml"},
+        "julia": {"kind": "julia", "path": "Project.toml", "julia": "1.11"},
+        "renv": {"kind": "renv", "path": "DESCRIPTION"},
+        "nix": {"kind": "nix", "path": "flake.nix"},
+        "docker": {"kind": "docker", "image": "ubuntu"},
+        "matlab": {"kind": "matlab", "version": "R2024a"},
+        "here": {"kind": "system"},
+        "slurm": {"kind": "slurm"},
+        "venv": {"kind": "venv", "path": "requirements.txt"},
+        # TeX Live, the only kind composed in, is installed by Calkit
+        "tex": {"kind": "texlive", "packages": []},
+        "far": {"kind": "system", "host": "calkit-test.invalid"},
+    }
+    envs["uv"]["with"] = ["tex"]
     get = calkit.environments.get_implied_requirements
-    # Each app once, and none for Docker, which offers itself, or for kinds
-    # built with nothing beyond Calkit
-    assert get(envs, []) == ["conda", "uv", "pixi", "julia", "Rscript", "nix"]
-    assert get([], []) == []
-    # One declared is what's checked instead, however it's written
-    for declared, left_out in [
-        ([{"name": "conda", "setup_command": "echo"}], "conda"),
-        (["uv>=0.5"], "uv"),
-        (["pixi"], "pixi"),
-        ([{"kind": "app", "name": "julia"}], "julia"),
-    ]:
-        implied = get(envs, declared)
-        assert left_out not in implied
-        assert len(implied) == 5
+    used = list(envs.items())[:-1]
+    stage: dict = {"kind": "shell-command", "command": "true"}
+    # Each environment's, and none for Docker, which offers itself, or for
+    # kinds built with nothing beyond Calkit
+    assert get(stage, used, []) == {
+        "conda": "conda",
+        "uv": "uv",
+        "uv-venv": "uv",
+        "pixi": "pixi",
+        "julia": "julia",
+        "renv": "Rscript",
+        "nix": "nix",
+    }
+    assert get(stage, [], []) == {}
+    # A script's own environment is uv's
+    script_stage = {"kind": "python-script", "script_path": "a.py"}
+    assert get(script_stage, [], []) == {"a.py": "uv"}
+    assert get(script_stage | {"wdir": "sub"}, [], ["uv"]) == {}
+    # One declared is what's checked instead, however it's written, and
+    # wherever it applies here, as is one sharing its installer
+    cases: list[tuple[list, list, str]] = [
+        ([{"name": "conda", "setup_command": "echo"}], [], "conda"),
+        (["mamba"], [], "conda"),
+        ([], ["uv>=0.5"], "uv"),
+        ([], [{"kind": "app", "name": "juliaup"}], "julia"),
+        (["R"], [], "Rscript"),
+    ]
+    for project_requirements, stage_requirements, left_out in cases:
+        implied = get(
+            stage | {"requirements": stage_requirements},
+            used,
+            project_requirements,
+        )
+        assert left_out not in implied.values()
+        assert len(set(implied.values())) == 5
+    envs["here"]["requirements"] = ["pixi"]
+    assert "pixi" not in get(stage, used, []).values()
     # Something other than an app of the same name doesn't count, and a
     # malformed one is left to be reported where it's checked
-    assert get(envs[:1], [{"kind": "env-var", "name": "conda"}, {"x": 1}]) == [
-        "conda"
-    ]
+    declared = [{"kind": "env-var", "name": "conda"}, {"x": 1}]
+    assert get(stage, used[:1], declared) == {"conda": "conda"}
+    # One sent to another machine needs none here, and what's declared for
+    # there doesn't count for a stage that runs here in its inner env
+    remote = used[:1] + [("far", envs["far"] | {"requirements": ["conda"]})]
+    assert get(stage, remote, []) == {}
+    notebook = {"kind": "jupyter-notebook", "requirements": ["conda"]}
+    assert get(notebook, remote, []) == {"conda": "conda"}
+    assert get(notebook, remote, ["conda"]) == {}

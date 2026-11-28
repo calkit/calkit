@@ -3904,8 +3904,6 @@ def run(
     def gate(stage_names: set[str] | None) -> None:
         """Skip the stages that can't run here, of these or all of them."""
         expanded = calkit.markdown.expand_ck_info(ck_info).ck_info
-        # What each requirement came to, so a retry doesn't check it again
-        checked: dict[str, str | None] = {}
         try:
             gated, errors = calkit.pipeline.get_gated_stages(
                 expanded,
@@ -3915,7 +3913,7 @@ def run(
                 manual=can_ask,
                 requirements_by_stage=unmet_requirements,
                 blocked_by=blocked_by,
-                checked=checked,
+                checked=gate_checked,
             )
             # A machine that couldn't be reached may only need asking about,
             # e.g., for its host
@@ -3926,7 +3924,7 @@ def run(
                         stage_names=set(errors),
                         system_info=system_info,
                         interactive=True,
-                        checked=checked,
+                        checked=gate_checked,
                     )
                 gated |= retried
         except Exception as e:
@@ -4147,6 +4145,9 @@ def run(
         name: calkit.dvc.SKIP_REQUESTED for name in skip
     }
     gate_errors: dict[str, str] = {}
+    # What each requirement the gate checks came to, so it's checked and
+    # said once, however many times the gate runs
+    gate_checked: dict[str, str | None] = {}
     # Those skipped for requirements, with them, which are offered for each
     # one that would run, and those skipped for another's missing output
     unmet_requirements: dict[str, list] = {}
@@ -4834,7 +4835,6 @@ def run(
     # A skip is only fine when the project says the stage can't run here and
     # nobody asked for it by name, or for every stage with --strict
     targeted = {t.split("@")[0] for t in targets or []}
-    error_reasons = set(gate_errors.values())
     # Skipped as requested, so not reported with those that can't run here
     skipped_as_asked = [
         addressing
@@ -4846,7 +4846,8 @@ def run(
     for addressing, reason in skipped_stale.items():
         if (
             strict
-            or reason in error_reasons
+            or addressing in gate_errors
+            or addressing.split("@")[0] in gate_errors
             or addressing.split("@")[0] in targeted
         ):
             typer.echo(

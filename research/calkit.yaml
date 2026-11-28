@@ -430,7 +430,7 @@ datasets:
       evaluations of AI research agents, coded by an AI agent from public
       documents. See real-world-errors/README.md.
     created_by:
-      email: petebachant@gmail.com
+      name: Pete Bachant
       with_ai: Claude Opus 5.5
 
 tables:

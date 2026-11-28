@@ -1,3 +1,10 @@
+# /// script
+# requires-python = ">=3.12"
+# dependencies = [
+#     "pyyaml>=6.0.4",
+#     "requests>=2.34.2",
+# ]
+# ///
 """Find papers built with the Calkit projects in the wild.
 
 A project's calkit.yaml lists its publications, which are published once they

@@ -88,220 +88,86 @@ stages:
       md5: 46896831ad260afebc87cd85a7ea159a
       size: 133600
   traction:
-    cmd: calkit xenv -n dev --no-check -- python scripts/traction.py 
+    cmd: calkit xenv -n pipeline --no-check -- python scripts/traction.py 
       --exclude-hub-account=pwbachant --exclude-hub-account=calkit
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 35238423a2341040438e22bf865435a1
+      md5: 9368b4a0a228b26c3cebd1945be61f06
       size: 11
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
     - path: data/calkit-projects/papers.csv
       hash: md5
       md5: 8922d813a4e72bf1600400fd0d6f38d8
       size: 5368
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
     - path: scripts/traction.py
       hash: md5
       md5: 3c46a0f6c5ec81bddb3cfc6b089c173d
       size: 4216
-    - path: uv.lock
+    - path: scripts/uv.lock
       hash: md5
-      md5: 8270c1e3cc10ce2b1fd4c69e2495a8a0
-      size: 1711913
+      md5: 33ac24fa809e9ad5c555dd654ad3caa3
+      size: 866631
     outs:
     - path: results/traction.json
       hash: md5
-      md5: 539c63380c3d4f5da24ecd3b4356b2ac
+      md5: c845f3fa6c13dbfdca0bb4ab56f1f8f0
       size: 539
   find-calkit-projects:
-    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-projects.py
+    cmd: uv run --locked --script scripts/find-calkit-projects.py
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 35238423a2341040438e22bf865435a1
+      md5: 9368b4a0a228b26c3cebd1945be61f06
       size: 11
-    - path: .python-version
+    - path: scripts/.python-version
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
     - path: scripts/find-calkit-projects.py
       hash: md5
-      md5: be2c6e0914ead24e57d4a628321a3dc6
-      size: 13491
-    - path: uv.lock
+      md5: 8b0b00a5d1f49073dd49a3bf78c49eb8
+      size: 13611
+    - path: scripts/find-calkit-projects.py.lock
       hash: md5
-      md5: 8270c1e3cc10ce2b1fd4c69e2495a8a0
-      size: 1711913
+      md5: 0123a4969b4fb43b4a9dd799d780370b
+      size: 63515
     outs:
     - path: data/calkit-projects/projects.csv
       hash: md5
-      md5: fe3a12c2f81973cc4d6a18607edcace0
+      md5: b0e5d2a095261e18b053f472cc208808
       size: 12043
   find-calkit-papers:
-    cmd: calkit xenv -n dev --no-check -- python scripts/find-calkit-papers.py
+    cmd: uv run --locked --script scripts/find-calkit-papers.py
     deps:
     - path: .calkit/local/current-periods/1-day-utc.txt
       hash: md5
-      md5: 35238423a2341040438e22bf865435a1
+      md5: 9368b4a0a228b26c3cebd1945be61f06
       size: 11
-    - path: .python-version
+    - path: data/calkit-projects/projects.csv
+      hash: md5
+      md5: b0e5d2a095261e18b053f472cc208808
+      size: 12043
+    - path: scripts/.python-version
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
-    - path: data/calkit-projects/projects.csv
-      hash: md5
-      md5: fe3a12c2f81973cc4d6a18607edcace0
-      size: 12043
     - path: scripts/find-calkit-papers.py
       hash: md5
-      md5: 47c5738cb38a674825999afa124c74c8
-      size: 6400
-    - path: uv.lock
+      md5: ffc00e1f0a44dae839c70466f858f974
+      size: 6520
+    - path: scripts/find-calkit-papers.py.lock
       hash: md5
-      md5: 8270c1e3cc10ce2b1fd4c69e2495a8a0
-      size: 1711913
+      md5: 0123a4969b4fb43b4a9dd799d780370b
+      size: 63515
     outs:
     - path: data/calkit-projects/papers.csv
       hash: md5
       md5: 8922d813a4e72bf1600400fd0d6f38d8
       size: 5368
-  research-flow:
-    cmd: calkit xenv -n dev --no-check -- python scripts/research-flow.py
-    deps:
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: docs/roi/research_flow.py
-      hash: md5
-      md5: 2606a35ff9b89cfcb3d5d19721745dfc
-      size: 36026
-    - path: scripts/research-flow.py
-      hash: md5
-      md5: c626580f6f61f1f7f6b05abb88ad5f5f
-      size: 14225
-    - path: uv.lock
-      hash: md5
-      md5: 41d9d32557f167a8b7d91d223499000b
-      size: 1711912
-    outs:
-    - path: results/research-flow.json
-      hash: md5
-      md5: ad60cc07e5c53f0803252e215ff43141
-      size: 75297
-  budget-2027:
-    cmd: calkit xenv -n dev --no-check -- python scripts/budget.py --workshops=8 
-      --attendees=25 --supported=60 --indirect-rate=0
-    deps:
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: docs/one-pager/2027-budget.csv
-      hash: md5
-      md5: 615371325329fb6e138f35e06443ea7d
-      size: 586
-    - path: scripts/budget.py
-      hash: md5
-      md5: 80f868056b22d3ad794451aef2799c09
-      size: 2015
-    - path: uv.lock
-      hash: md5
-      md5: 41d9d32557f167a8b7d91d223499000b
-      size: 1711912
-    outs:
-    - path: results/2027-budget.json
-      hash: md5
-      md5: 35eeb271dbd0ac856631b17035062793
-      size: 2007
-  research-flow-figure:
-    cmd: calkit xenv -n dev --no-check -- python scripts/plot-research-flow.py
-    deps:
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: results/research-flow.json
-      hash: md5
-      md5: ad60cc07e5c53f0803252e215ff43141
-      size: 75297
-    - path: scripts/plot-research-flow.py
-      hash: md5
-      md5: 19f5cc7b755ecf4c3c11b1bf734ee1e6
-      size: 12155
-    - path: uv.lock
-      hash: md5
-      md5: 41d9d32557f167a8b7d91d223499000b
-      size: 1711912
-    outs:
-    - path: docs/img/research-flow-goals.png
-      hash: md5
-      md5: 2f51de4bcd08abc1aa3c315ab72f3791
-      size: 181088
-    - path: docs/img/research-flow-waste.png
-      hash: md5
-      md5: cfedb6778117dc414b124133b52ebdcc
-      size: 115898
-    - path: docs/img/research-flow.png
-      hash: md5
-      md5: 790617f6b091c1961c33e08fda9172f4
-      size: 335476
-  budget-2027-figure:
-    cmd: calkit xenv -n dev --no-check -- python scripts/plot-budget.py
-    deps:
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: docs/one-pager/texgyreheros-regular.otf
-      hash: md5
-      md5: 46896831ad260afebc87cd85a7ea159a
-      size: 133600
-    - path: results/2027-budget.json
-      hash: md5
-      md5: 35eeb271dbd0ac856631b17035062793
-      size: 2007
-    - path: scripts/plot-budget.py
-      hash: md5
-      md5: 797538b799271ea0db0ec1bf5eda6703
-      size: 1616
-    - path: uv.lock
-      hash: md5
-      md5: 41d9d32557f167a8b7d91d223499000b
-      size: 1711912
-    outs:
-    - path: docs/img/2027-budget.png
-      hash: md5
-      md5: eff1b7836ea6adab774dd096bb47bb5c
-      size: 50208
-  latex-image-readme/sizes:
-    cmd: calkit xenv -n dev --no-check -- python 
-      .calkit/markdown/images/latex/README.md/sizes.py
-    deps:
-    - path: .calkit/markdown/images/latex/README.md/sizes.py
-      hash: md5
-      md5: 7ee40f897ceb2046753dc7aee67b09f7
-      size: 1955
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
-    - path: calkit/latex.py
-      hash: md5
-      md5: 7215d35c9f1e2ce901058d328a8c7a41
-      size: 139495
-    - path: uv.lock
-      hash: md5
-      md5: 41d9d32557f167a8b7d91d223499000b
-      size: 1711912
-    outs:
-    - path: images/latex/sizes.json
-      hash: md5
-      md5: e98e2e9c4e620e7d82667127fdd60978
-      size: 335
   latex-word-round-trip-docx-pdf:
     cmd: calkit xenv -n libreoffice --no-check -- sh -c "soffice 
       -env:UserInstallation=file:///tmp/calkit-libreoffice --headless --convert-to
@@ -315,25 +181,203 @@ stages:
       nfiles: 2
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: b42d272daf2d32f06a80341dd598fc8d
-      size: 36379
+      md5: 1f509d23548f197be23aa38ad742dfc5
+      size: 36372
     outs:
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 763ff219eafa008d875a29e65a6c2823
+      md5: eb69efb3272abbc2c559116671059b7f
       size: 125620
-  latex-word-round-trip:
-    cmd: calkit xenv -n dev --no-check -- python scripts/latex-word-round-trip.py 
-      --engine=libreoffice
+  one-pager/pdf:
+    cmd: calkit latex from-markdown docs/one-pager/main.md -o 
+      docs/one-pager/main.pdf -e tex --no-check --template 
+      docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua 
+      --pandoc-arg=--shift-heading-level-by=-1
     deps:
-    - path: .python-version
+    - path: .calkit/env-locks/tex
+      hash: md5
+      md5: b2d28555a90965646645402d6964aa46.dir
+      size: 2832
+      nfiles: 2
+    - path: calkit.yaml
+      hash: md5
+      md5: 106dc5f4b861c1f2e62f0dbc49ab3a86
+      size: 14614
+    - path: docs/img/2027-budget.png
+      hash: md5
+      md5: 82bcb90f669de1dab0f793ed24682a25
+      size: 45258
+    - path: docs/img/pipeline.png
+      hash: md5
+      md5: 0c09798b4e2fd432f0ca5f0edefb5b38
+      size: 50359
+    - path: docs/one-pager/main.md
+      hash: md5
+      md5: bc0689c81999021f9ab19691b00c0881
+      size: 4743
+    - path: docs/one-pager/one-pager.lua
+      hash: md5
+      md5: 1102b36541da50fb365f4eb12351f882
+      size: 3327
+    - path: docs/one-pager/template.tex
+      hash: md5
+      md5: 5d31f5987fcef529f4b4b6348abc7ab8
+      size: 4553
+    - path: results/2027-budget.json
+      hash: md5
+      md5: 35eeb271dbd0ac856631b17035062793
+      size: 2007
+    - path: results/traction.json
+      hash: md5
+      md5: c845f3fa6c13dbfdca0bb4ab56f1f8f0
+      size: 539
+    outs:
+    - path: docs/one-pager/main.pdf
+      hash: md5
+      md5: 741d3a7ecfcbbae4da4db68348d37246
+      size: 176490
+  research-flow:
+    cmd: uv run --locked --script scripts/research-flow.py
+    deps:
+    - path: docs/roi/research_flow.py
+      hash: md5
+      md5: 2606a35ff9b89cfcb3d5d19721745dfc
+      size: 36026
+    - path: scripts/.python-version
       hash: md5
       md5: 61939823fbcc7e8de3b61ab105331baf
       size: 5
+    - path: scripts/research-flow.py
+      hash: md5
+      md5: 3eda03aff797fd73a55bb866066ddef7
+      size: 14340
+    - path: scripts/research-flow.py.lock
+      hash: md5
+      md5: 8e39261bdd377cdd7c1f62ce8455e31e
+      size: 21682
+    outs:
+    - path: results/research-flow.json
+      hash: md5
+      md5: ad60cc07e5c53f0803252e215ff43141
+      size: 75297
+  budget-2027:
+    cmd: uv run --locked --script scripts/budget.py --workshops=8 --attendees=25 
+      --supported=60 --indirect-rate=0
+    deps:
+    - path: docs/one-pager/2027-budget.csv
+      hash: md5
+      md5: 615371325329fb6e138f35e06443ea7d
+      size: 586
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/budget.py
+      hash: md5
+      md5: b8a643d65621034d13f1f6aed89e88f9
+      size: 2083
+    - path: scripts/budget.py.lock
+      hash: md5
+      md5: 00d7e6f27c6c357c4d2867838af5b4bb
+      size: 52
+    outs:
+    - path: results/2027-budget.json
+      hash: md5
+      md5: 35eeb271dbd0ac856631b17035062793
+      size: 2007
+  research-flow-figure:
+    cmd: uv run --locked --script scripts/plot-research-flow.py
+    deps:
+    - path: results/research-flow.json
+      hash: md5
+      md5: ad60cc07e5c53f0803252e215ff43141
+      size: 75297
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/plot-research-flow.py
+      hash: md5
+      md5: bfea4fd8187d0abb91d30e5229133add
+      size: 12276
+    - path: scripts/plot-research-flow.py.lock
+      hash: md5
+      md5: e1ad7fd126400d3be1804a9b29edbe8e
+      size: 134880
+    outs:
+    - path: docs/img/research-flow-goals.png
+      hash: md5
+      md5: 1dbee6b93e7411e3995012f938baea14
+      size: 171118
+    - path: docs/img/research-flow-waste.png
+      hash: md5
+      md5: e91e398c786fd0b39690033fcc8af861
+      size: 114802
+    - path: docs/img/research-flow.png
+      hash: md5
+      md5: 6141101d8803251a8bdb41076253a7e9
+      size: 340477
+  budget-2027-figure:
+    cmd: uv run --locked --script scripts/plot-budget.py
+    deps:
+    - path: docs/one-pager/texgyreheros-regular.otf
+      hash: md5
+      md5: 46896831ad260afebc87cd85a7ea159a
+      size: 133600
+    - path: results/2027-budget.json
+      hash: md5
+      md5: 35eeb271dbd0ac856631b17035062793
+      size: 2007
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/plot-budget.py
+      hash: md5
+      md5: 29d8ea305eae420024475b855f2e3e41
+      size: 1715
+    - path: scripts/plot-budget.py.lock
+      hash: md5
+      md5: 45731d708e81d1f18fba58353d24cbb1
+      size: 134826
+    outs:
+    - path: docs/img/2027-budget.png
+      hash: md5
+      md5: 82bcb90f669de1dab0f793ed24682a25
+      size: 45258
+  latex-image-readme/sizes:
+    cmd: calkit xenv -n pipeline --no-check -- python 
+      .calkit/markdown/images/latex/README.md/sizes.py
+    deps:
+    - path: .calkit/markdown/images/latex/README.md/sizes.py
+      hash: md5
+      md5: 7ee40f897ceb2046753dc7aee67b09f7
+      size: 1955
+    - path: calkit/latex.py
+      hash: md5
+      md5: 7215d35c9f1e2ce901058d328a8c7a41
+      size: 139495
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
+    - path: scripts/uv.lock
+      hash: md5
+      md5: 33ac24fa809e9ad5c555dd654ad3caa3
+      size: 866631
+    outs:
+    - path: images/latex/sizes.json
+      hash: md5
+      md5: e98e2e9c4e620e7d82667127fdd60978
+      size: 335
+  latex-word-round-trip:
+    cmd: calkit xenv -n pipeline --no-check -- python 
+      scripts/latex-word-round-trip.py --engine=libreoffice
+    deps:
     - path: calkit/cli/latex.py
       hash: md5
-      md5: ce5bee4ba538172f765b3b8ee8a8ca48
-      size: 199677
+      md5: d751990ccc7bc8555ef64937601a5646
+      size: 199824
     - path: calkit/docx.py
       hash: md5
       md5: 83e04bd9da02144e6bcb80a5a749767d
@@ -362,14 +406,18 @@ stages:
       hash: md5
       md5: d408073e0b7d015b98bc37327afd10e2
       size: 500
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
     - path: scripts/latex-word-round-trip.py
       hash: md5
       md5: 9d9881805e81eb093e6e5206b04411aa
       size: 4976
-    - path: uv.lock
+    - path: scripts/uv.lock
       hash: md5
-      md5: 41d9d32557f167a8b7d91d223499000b
-      size: 1711912
+      md5: 33ac24fa809e9ad5c555dd654ad3caa3
+      size: 866631
     outs:
     - path: results/latex-word-round-trip.json
       hash: md5
@@ -385,16 +433,11 @@ stages:
       size: 173896
     - path: results/latex-word-round-trip/review.docx
       hash: md5
-      md5: b42d272daf2d32f06a80341dd598fc8d
-      size: 36379
+      md5: 1f509d23548f197be23aa38ad742dfc5
+      size: 36372
   latex-word-round-trip-figure:
-    cmd: calkit xenv -n dev --no-check -- python 
-      scripts/plot-latex-word-round-trip.py
+    cmd: uv run --locked --script scripts/plot-latex-word-round-trip.py
     deps:
-    - path: .python-version
-      hash: md5
-      md5: 61939823fbcc7e8de3b61ab105331baf
-      size: 5
     - path: results/latex-word-round-trip/original.pdf
       hash: md5
       md5: 6a04754199f6a394429ca0c07e4ecda6
@@ -405,66 +448,22 @@ stages:
       size: 173896
     - path: results/latex-word-round-trip/review.pdf
       hash: md5
-      md5: 763ff219eafa008d875a29e65a6c2823
+      md5: eb69efb3272abbc2c559116671059b7f
       size: 125620
+    - path: scripts/.python-version
+      hash: md5
+      md5: 61939823fbcc7e8de3b61ab105331baf
+      size: 5
     - path: scripts/plot-latex-word-round-trip.py
       hash: md5
-      md5: beac6486385258092916d8e81cce06f9
-      size: 1776
-    - path: uv.lock
+      md5: 4314072dd9e9c4697d5f183056463367
+      size: 1902
+    - path: scripts/plot-latex-word-round-trip.py.lock
       hash: md5
-      md5: 41d9d32557f167a8b7d91d223499000b
-      size: 1711912
+      md5: c81c945145853aa90f2cbae3c67a547a
+      size: 142338
     outs:
     - path: docs/img/latex-word-round-trip.png
       hash: md5
-      md5: bc2c26159f88e695060e05e09143517a
-      size: 202890
-  one-pager/pdf:
-    cmd: calkit latex from-markdown docs/one-pager/main.md -o 
-      docs/one-pager/main.pdf -e tex --no-check --template 
-      docs/one-pager/template.tex --filter docs/one-pager/one-pager.lua 
-      --pandoc-arg=--shift-heading-level-by=-1
-    deps:
-    - path: .calkit/env-locks/tex
-      hash: md5
-      md5: b2d28555a90965646645402d6964aa46.dir
-      size: 2832
-      nfiles: 2
-    - path: calkit.yaml
-      hash: md5
-      md5: f8fa8bea768953429f1cbdb6762e69e8
-      size: 14458
-    - path: docs/img/2027-budget.png
-      hash: md5
-      md5: eff1b7836ea6adab774dd096bb47bb5c
-      size: 50208
-    - path: docs/img/pipeline.png
-      hash: md5
-      md5: 0c09798b4e2fd432f0ca5f0edefb5b38
-      size: 50359
-    - path: docs/one-pager/main.md
-      hash: md5
-      md5: 677bc75cc52bb8cd2a2c2bebf300342e
-      size: 4743
-    - path: docs/one-pager/one-pager.lua
-      hash: md5
-      md5: 1102b36541da50fb365f4eb12351f882
-      size: 3327
-    - path: docs/one-pager/template.tex
-      hash: md5
-      md5: 5d31f5987fcef529f4b4b6348abc7ab8
-      size: 4553
-    - path: results/2027-budget.json
-      hash: md5
-      md5: 35eeb271dbd0ac856631b17035062793
-      size: 2007
-    - path: results/traction.json
-      hash: md5
-      md5: 539c63380c3d4f5da24ecd3b4356b2ac
-      size: 539
-    outs:
-    - path: docs/one-pager/main.pdf
-      hash: md5
-      md5: a011ded938424e92848b8c2f22c24ab4
-      size: 179732
+      md5: 23db3ce252dbfe1055eccee73d1e6a56
+      size: 258447

@@ -27,8 +27,12 @@ which works out where each figure, table, and value came from,
 and writes the MyST plugin that shows them,
 in `paper/_extensions/calkit/`, kept in Git,
 which `paper/myst.yml` lists along with its stylesheet.
-To see the site, run `myst start` in `paper/`,
-e.g., with `pixi run --manifest-path ../pixi.toml myst start`.
+To see the site, start MyST's preview server in `paper/`, in the
+project's environment:
+
+```sh
+calkit xenv -n py --wdir paper -- myst start
+```
 
 <!-- TODO: needs human review -->
 

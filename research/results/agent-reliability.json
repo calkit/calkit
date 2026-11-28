@@ -30,6 +30,7 @@
           "pass": 0,
           "n": 0
         },
+        "n_ok": 16,
         "n_incorrect_from_also_fixing": 0,
         "mean_cost_usd": 0.317,
         "total_cost_usd": 7.62,
@@ -60,6 +61,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.294,
           "total_cost_usd": 2.35,
@@ -90,6 +92,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.297,
             "total_cost_usd": 0.59,
@@ -119,6 +122,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.279,
             "total_cost_usd": 0.56,
@@ -148,6 +152,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.31,
             "total_cost_usd": 0.62,
@@ -177,6 +182,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.289,
             "total_cost_usd": 0.58,
@@ -209,6 +215,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 8,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.267,
           "total_cost_usd": 2.14,
@@ -239,6 +246,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.24,
             "total_cost_usd": 0.48,
@@ -268,6 +276,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.251,
             "total_cost_usd": 0.5,
@@ -297,6 +306,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.251,
             "total_cost_usd": 0.5,
@@ -326,6 +336,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.326,
             "total_cost_usd": 0.65,
@@ -358,6 +369,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 8,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.391,
           "total_cost_usd": 3.13,
@@ -388,6 +400,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.364,
             "total_cost_usd": 0.73,
@@ -417,6 +430,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.354,
             "total_cost_usd": 0.71,
@@ -446,6 +460,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.374,
             "total_cost_usd": 0.75,
@@ -475,6 +490,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.472,
             "total_cost_usd": 0.94,
@@ -508,6 +524,7 @@
           "pass": 24,
           "n": 24
         },
+        "n_ok": 28,
         "n_incorrect_from_also_fixing": 2,
         "mean_cost_usd": 0.373,
         "total_cost_usd": 17.18,
@@ -538,6 +555,7 @@
             "pass": 8,
             "n": 8
           },
+          "n_ok": 4,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.409,
           "total_cost_usd": 4.9,
@@ -568,6 +586,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.363,
             "total_cost_usd": 0.73,
@@ -597,6 +616,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.375,
             "total_cost_usd": 0.75,
@@ -626,6 +646,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.379,
             "total_cost_usd": 0.76,
@@ -655,6 +676,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.439,
             "total_cost_usd": 0.88,
@@ -684,6 +706,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.541,
             "total_cost_usd": 1.08,
@@ -713,6 +736,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.355,
             "total_cost_usd": 0.71,
@@ -745,6 +769,7 @@
             "pass": 8,
             "n": 8
           },
+          "n_ok": 4,
           "n_incorrect_from_also_fixing": 2,
           "mean_cost_usd": 0.382,
           "total_cost_usd": 5.34,
@@ -775,6 +800,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.319,
             "total_cost_usd": 0.64,
@@ -804,6 +830,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.355,
             "total_cost_usd": 0.71,
@@ -833,6 +860,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.45,
             "total_cost_usd": 0.9,
@@ -862,6 +890,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.357,
             "total_cost_usd": 0.71,
@@ -891,6 +920,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.485,
             "total_cost_usd": 0.97,
@@ -920,6 +950,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 2,
             "mean_cost_usd": 0.399,
             "total_cost_usd": 0.8,
@@ -949,6 +980,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.305,
             "total_cost_usd": 0.61,
@@ -981,6 +1013,7 @@
             "pass": 4,
             "n": 4
           },
+          "n_ok": 10,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.293,
           "total_cost_usd": 2.93,
@@ -1011,6 +1044,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.273,
             "total_cost_usd": 0.55,
@@ -1040,6 +1074,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.318,
             "total_cost_usd": 0.64,
@@ -1069,6 +1104,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.418,
             "total_cost_usd": 0.84,
@@ -1098,6 +1134,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.192,
             "total_cost_usd": 0.38,
@@ -1127,6 +1164,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.265,
             "total_cost_usd": 0.53,
@@ -1159,6 +1197,7 @@
             "pass": 4,
             "n": 4
           },
+          "n_ok": 10,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.4,
           "total_cost_usd": 4.0,
@@ -1189,6 +1228,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.394,
             "total_cost_usd": 0.79,
@@ -1218,6 +1258,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.417,
             "total_cost_usd": 0.83,
@@ -1247,6 +1288,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.511,
             "total_cost_usd": 1.02,
@@ -1276,6 +1318,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.335,
             "total_cost_usd": 0.67,
@@ -1305,6 +1348,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.342,
             "total_cost_usd": 0.68,
@@ -1338,6 +1382,7 @@
           "pass": 18,
           "n": 30
         },
+        "n_ok": 31,
         "n_incorrect_from_also_fixing": 12,
         "mean_cost_usd": 0.408,
         "total_cost_usd": 16.33,
@@ -1368,6 +1413,7 @@
             "pass": 4,
             "n": 6
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 2,
           "mean_cost_usd": 0.433,
           "total_cost_usd": 3.46,
@@ -1398,6 +1444,7 @@
               "pass": 1,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 1,
             "mean_cost_usd": 0.601,
             "total_cost_usd": 1.2,
@@ -1427,6 +1474,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.424,
             "total_cost_usd": 0.85,
@@ -1456,6 +1504,7 @@
               "pass": 1,
               "n": 2
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.345,
             "total_cost_usd": 0.69,
@@ -1485,6 +1534,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 0,
             "n_incorrect_from_also_fixing": 1,
             "mean_cost_usd": 0.362,
             "total_cost_usd": 0.72,
@@ -1517,6 +1567,7 @@
             "pass": 4,
             "n": 6
           },
+          "n_ok": 8,
           "n_incorrect_from_also_fixing": 1,
           "mean_cost_usd": 0.319,
           "total_cost_usd": 2.55,
@@ -1547,6 +1598,7 @@
               "pass": 0,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 1,
             "mean_cost_usd": 0.48,
             "total_cost_usd": 0.96,
@@ -1576,6 +1628,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.306,
             "total_cost_usd": 0.61,
@@ -1605,6 +1658,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.294,
             "total_cost_usd": 0.59,
@@ -1634,6 +1688,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.194,
             "total_cost_usd": 0.39,
@@ -1666,6 +1721,7 @@
             "pass": 2,
             "n": 6
           },
+          "n_ok": 7,
           "n_incorrect_from_also_fixing": 4,
           "mean_cost_usd": 0.377,
           "total_cost_usd": 3.01,
@@ -1696,6 +1752,7 @@
               "pass": 0,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 2,
             "mean_cost_usd": 0.525,
             "total_cost_usd": 1.05,
@@ -1725,6 +1782,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.347,
             "total_cost_usd": 0.69,
@@ -1754,6 +1812,7 @@
               "pass": 0,
               "n": 2
             },
+            "n_ok": 1,
             "n_incorrect_from_also_fixing": 1,
             "mean_cost_usd": 0.34,
             "total_cost_usd": 0.68,
@@ -1783,6 +1842,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 1,
             "mean_cost_usd": 0.295,
             "total_cost_usd": 0.59,
@@ -1815,6 +1875,7 @@
             "pass": 4,
             "n": 6
           },
+          "n_ok": 8,
           "n_incorrect_from_also_fixing": 2,
           "mean_cost_usd": 0.453,
           "total_cost_usd": 3.62,
@@ -1845,6 +1906,7 @@
               "pass": 0,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 2,
             "mean_cost_usd": 0.744,
             "total_cost_usd": 1.49,
@@ -1874,6 +1936,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.384,
             "total_cost_usd": 0.77,
@@ -1903,6 +1966,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.396,
             "total_cost_usd": 0.79,
@@ -1932,6 +1996,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.287,
             "total_cost_usd": 0.57,
@@ -1964,6 +2029,7 @@
             "pass": 4,
             "n": 6
           },
+          "n_ok": 8,
           "n_incorrect_from_also_fixing": 3,
           "mean_cost_usd": 0.46,
           "total_cost_usd": 3.68,
@@ -1994,6 +2060,7 @@
               "pass": 0,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 1,
             "mean_cost_usd": 0.65,
             "total_cost_usd": 1.3,
@@ -2023,6 +2090,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.352,
             "total_cost_usd": 0.7,
@@ -2052,6 +2120,7 @@
               "pass": 2,
               "n": 2
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 0,
             "mean_cost_usd": 0.403,
             "total_cost_usd": 0.81,
@@ -2081,6 +2150,7 @@
               "pass": 0,
               "n": 0
             },
+            "n_ok": 2,
             "n_incorrect_from_also_fixing": 2,
             "mean_cost_usd": 0.432,
             "total_cost_usd": 0.86,
@@ -2116,6 +2186,7 @@
           "pass": 0,
           "n": 0
         },
+        "n_ok": 0,
         "n_incorrect_from_also_fixing": 0,
         "mean_cost_usd": 0.294,
         "total_cost_usd": 2.35,
@@ -2146,6 +2217,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.297,
           "total_cost_usd": 0.59,
@@ -2175,6 +2247,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.279,
           "total_cost_usd": 0.56,
@@ -2204,6 +2277,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.31,
           "total_cost_usd": 0.62,
@@ -2233,6 +2307,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.289,
           "total_cost_usd": 0.58,
@@ -2265,6 +2340,7 @@
           "pass": 8,
           "n": 8
         },
+        "n_ok": 4,
         "n_incorrect_from_also_fixing": 0,
         "mean_cost_usd": 0.409,
         "total_cost_usd": 4.9,
@@ -2295,6 +2371,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.363,
           "total_cost_usd": 0.73,
@@ -2324,6 +2401,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.375,
           "total_cost_usd": 0.75,
@@ -2353,6 +2431,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.379,
           "total_cost_usd": 0.76,
@@ -2382,6 +2461,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.439,
           "total_cost_usd": 0.88,
@@ -2411,6 +2491,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.541,
           "total_cost_usd": 1.08,
@@ -2440,6 +2521,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.355,
           "total_cost_usd": 0.71,
@@ -2472,6 +2554,7 @@
           "pass": 12,
           "n": 14
         },
+        "n_ok": 4,
         "n_incorrect_from_also_fixing": 4,
         "mean_cost_usd": 0.4,
         "total_cost_usd": 8.81,
@@ -2502,6 +2585,7 @@
             "pass": 1,
             "n": 2
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 1,
           "mean_cost_usd": 0.601,
           "total_cost_usd": 1.2,
@@ -2531,6 +2615,7 @@
             "pass": 4,
             "n": 4
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.372,
           "total_cost_usd": 1.49,
@@ -2560,6 +2645,7 @@
             "pass": 3,
             "n": 4
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.35,
           "total_cost_usd": 1.4,
@@ -2589,6 +2675,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.45,
           "total_cost_usd": 0.9,
@@ -2618,6 +2705,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.357,
           "total_cost_usd": 0.71,
@@ -2647,6 +2735,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.485,
           "total_cost_usd": 0.97,
@@ -2676,6 +2765,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 3,
           "mean_cost_usd": 0.38,
           "total_cost_usd": 1.52,
@@ -2705,6 +2795,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 0,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.305,
           "total_cost_usd": 0.61,
@@ -2737,6 +2828,7 @@
           "pass": 8,
           "n": 10
         },
+        "n_ok": 26,
         "n_incorrect_from_also_fixing": 1,
         "mean_cost_usd": 0.293,
         "total_cost_usd": 7.62,
@@ -2767,6 +2859,7 @@
             "pass": 0,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 1,
           "mean_cost_usd": 0.48,
           "total_cost_usd": 0.96,
@@ -2796,6 +2889,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 4,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.273,
           "total_cost_usd": 1.09,
@@ -2825,6 +2919,7 @@
             "pass": 4,
             "n": 4
           },
+          "n_ok": 4,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.284,
           "total_cost_usd": 1.13,
@@ -2854,6 +2949,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.251,
           "total_cost_usd": 0.5,
@@ -2883,6 +2979,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.251,
           "total_cost_usd": 0.5,
@@ -2912,6 +3009,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.326,
           "total_cost_usd": 0.65,
@@ -2941,6 +3039,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.318,
           "total_cost_usd": 0.64,
@@ -2970,6 +3069,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.418,
           "total_cost_usd": 0.84,
@@ -2999,6 +3099,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 4,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.193,
           "total_cost_usd": 0.77,
@@ -3028,6 +3129,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.265,
           "total_cost_usd": 0.53,
@@ -3060,6 +3162,7 @@
           "pass": 2,
           "n": 6
         },
+        "n_ok": 7,
         "n_incorrect_from_also_fixing": 4,
         "mean_cost_usd": 0.377,
         "total_cost_usd": 3.01,
@@ -3090,6 +3193,7 @@
             "pass": 0,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 2,
           "mean_cost_usd": 0.525,
           "total_cost_usd": 1.05,
@@ -3119,6 +3223,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.347,
           "total_cost_usd": 0.69,
@@ -3148,6 +3253,7 @@
             "pass": 0,
             "n": 2
           },
+          "n_ok": 1,
           "n_incorrect_from_also_fixing": 1,
           "mean_cost_usd": 0.34,
           "total_cost_usd": 0.68,
@@ -3177,6 +3283,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 1,
           "mean_cost_usd": 0.295,
           "total_cost_usd": 0.59,
@@ -3209,6 +3316,7 @@
           "pass": 8,
           "n": 10
         },
+        "n_ok": 26,
         "n_incorrect_from_also_fixing": 2,
         "mean_cost_usd": 0.413,
         "total_cost_usd": 10.75,
@@ -3239,6 +3347,7 @@
             "pass": 0,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 2,
           "mean_cost_usd": 0.744,
           "total_cost_usd": 1.49,
@@ -3268,6 +3377,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 4,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.374,
           "total_cost_usd": 1.5,
@@ -3297,6 +3407,7 @@
             "pass": 4,
             "n": 4
           },
+          "n_ok": 4,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.395,
           "total_cost_usd": 1.58,
@@ -3326,6 +3437,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.354,
           "total_cost_usd": 0.71,
@@ -3355,6 +3467,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.374,
           "total_cost_usd": 0.75,
@@ -3384,6 +3497,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.472,
           "total_cost_usd": 0.94,
@@ -3413,6 +3527,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.417,
           "total_cost_usd": 0.83,
@@ -3442,6 +3557,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.511,
           "total_cost_usd": 1.02,
@@ -3471,6 +3587,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 4,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.311,
           "total_cost_usd": 1.25,
@@ -3500,6 +3617,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.342,
           "total_cost_usd": 0.68,
@@ -3532,6 +3650,7 @@
           "pass": 4,
           "n": 6
         },
+        "n_ok": 8,
         "n_incorrect_from_also_fixing": 3,
         "mean_cost_usd": 0.46,
         "total_cost_usd": 3.68,
@@ -3562,6 +3681,7 @@
             "pass": 0,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 1,
           "mean_cost_usd": 0.65,
           "total_cost_usd": 1.3,
@@ -3591,6 +3711,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.352,
           "total_cost_usd": 0.7,
@@ -3620,6 +3741,7 @@
             "pass": 2,
             "n": 2
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 0,
           "mean_cost_usd": 0.403,
           "total_cost_usd": 0.81,
@@ -3649,6 +3771,7 @@
             "pass": 0,
             "n": 0
           },
+          "n_ok": 2,
           "n_incorrect_from_also_fixing": 2,
           "mean_cost_usd": 0.432,
           "total_cost_usd": 0.86,
@@ -3714,12 +3837,12 @@
         }
       },
       "messy-git": {
-        "noticed": 8,
-        "n": 20,
+        "noticed": 6,
+        "n": 18,
         "tasks": {
           "add-site": {
-            "noticed": 2,
-            "n": 2
+            "noticed": 0,
+            "n": 0
           },
           "data-correction": {
             "noticed": 0,
@@ -3752,12 +3875,12 @@
         }
       },
       "make": {
-        "noticed": 2,
-        "n": 24,
+        "noticed": 0,
+        "n": 22,
         "tasks": {
           "add-site": {
-            "noticed": 2,
-            "n": 2
+            "noticed": 0,
+            "n": 0
           },
           "data-correction": {
             "noticed": 0,
@@ -3798,12 +3921,12 @@
         }
       },
       "make-hint": {
-        "noticed": 8,
-        "n": 8,
+        "noticed": 6,
+        "n": 6,
         "tasks": {
           "add-site": {
-            "noticed": 2,
-            "n": 2
+            "noticed": 0,
+            "n": 0
           },
           "data-correction": {
             "noticed": 2,
@@ -3824,12 +3947,12 @@
         }
       },
       "calkit": {
-        "noticed": 2,
-        "n": 24,
+        "noticed": 0,
+        "n": 22,
         "tasks": {
           "add-site": {
-            "noticed": 2,
-            "n": 2
+            "noticed": 0,
+            "n": 0
           },
           "data-correction": {
             "noticed": 0,
@@ -3870,12 +3993,12 @@
         }
       },
       "calkit-hint": {
-        "noticed": 6,
-        "n": 8,
+        "noticed": 4,
+        "n": 6,
         "tasks": {
           "add-site": {
-            "noticed": 2,
-            "n": 2
+            "noticed": 0,
+            "n": 0
           },
           "data-correction": {
             "noticed": 0,
@@ -3897,14 +4020,14 @@
       }
     },
     "messy": {
-      "noticed": 12,
-      "n": 30
+      "noticed": 10,
+      "n": 28
     },
     "rest": {
-      "noticed": 4,
-      "n": 54
+      "noticed": 0,
+      "n": 50
     },
-    "fisher_p_one_sided": 0.0004781594135969477,
+    "fisher_p_one_sided": 1.04291055477627e-05,
     "site_e_pattern": "[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\\b|[Rr]e-?entr(?:y|ies)\\b|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)",
     "runs": {
       "messy-git__provenance__20261127-215415-517060": [
@@ -3960,19 +4083,6 @@
         "D-9",
         "Site D"
       ],
-      "calkit-hint__add-site__1": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "leading zero"
-      ],
-      "calkit-hint__add-site__2": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "site D",
-        "zero-pad"
-      ],
       "calkit-hint__distant-consumer__1": [
         "D-001",
         "D-9",
@@ -3998,32 +4108,6 @@
         "D-7",
         "Site D",
         "leading zero"
-      ],
-      "calkit__add-site__1": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "site D"
-      ],
-      "calkit__add-site__2": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "leading zero",
-        "site D"
-      ],
-      "make-hint__add-site__1": [
-        "D-001",
-        "D-1",
-        "Site D",
-        "leading zero",
-        "site D"
-      ],
-      "make-hint__add-site__2": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "site D"
       ],
       "make-hint__data-correction__1": [
         "D-009",
@@ -4066,33 +4150,6 @@
         "leading zero",
         "site D",
         "zero-pad"
-      ],
-      "make__add-site__1": [
-        "D-009",
-        "D-9",
-        "site D",
-        "zero-pad"
-      ],
-      "make__add-site__2": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "leading zero",
-        "site D"
-      ],
-      "messy-git__add-site__1": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "site D",
-        "zero-pad"
-      ],
-      "messy-git__add-site__2": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "leading zero",
-        "site D"
       ],
       "messy-git__stale-clone__2": [
         "D-009",
@@ -4144,8 +4201,12 @@
           "n_loaded_conventions": 0,
           "n_named_readme": 7,
           "site_d": {
-            "noticed": 3,
-            "n": 8
+            "noticed": 1,
+            "n": 6
+          },
+          "site_d_in_add_site": {
+            "noticed": 2,
+            "n": 2
           },
           "site_e": {
             "noticed": 2,
@@ -4164,8 +4225,12 @@
           "n_loaded_conventions": 0,
           "n_named_readme": 3,
           "site_d": {
+            "noticed": 0,
+            "n": 6
+          },
+          "site_d_in_add_site": {
             "noticed": 2,
-            "n": 8
+            "n": 2
           },
           "site_e": {
             "noticed": 2,
@@ -4184,8 +4249,12 @@
           "n_loaded_conventions": 0,
           "n_named_readme": 4,
           "site_d": {
-            "noticed": 8,
-            "n": 8
+            "noticed": 6,
+            "n": 6
+          },
+          "site_d_in_add_site": {
+            "noticed": 2,
+            "n": 2
           },
           "site_e": {
             "noticed": 1,
@@ -4204,8 +4273,12 @@
           "n_loaded_conventions": 8,
           "n_named_readme": 7,
           "site_d": {
+            "noticed": 0,
+            "n": 6
+          },
+          "site_d_in_add_site": {
             "noticed": 2,
-            "n": 8
+            "n": 2
           },
           "site_e": {
             "noticed": 1,
@@ -4224,8 +4297,12 @@
           "n_loaded_conventions": 8,
           "n_named_readme": 6,
           "site_d": {
-            "noticed": 6,
-            "n": 8
+            "noticed": 4,
+            "n": 6
+          },
+          "site_d_in_add_site": {
+            "noticed": 2,
+            "n": 2
           },
           "site_e": {
             "noticed": 2,
@@ -4244,13 +4321,13 @@
         "hint_vs_calkit": {
           "vs": "calkit",
           "alternative": "greater",
-          "site_d_p": 0.06596736596736597,
+          "site_d_p": 0.030303030303030304,
           "site_e_p": 0.5
         },
         "hint_vs_make_hint": {
           "vs": "make-hint",
           "alternative": "two-sided",
-          "site_d_p": 0.4666666666666667,
+          "site_d_p": 0.4545454545454546,
           "site_e_p": 1.0
         }
       }
@@ -4724,6 +4801,7 @@
       "minutes": 1.3166666666666667,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -4766,6 +4844,7 @@
       "minutes": 1.4166666666666667,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -4808,6 +4887,7 @@
       "minutes": 1.25,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -4850,6 +4930,7 @@
       "minutes": 1.4333333333333333,
       "turns": 11,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -4892,6 +4973,7 @@
       "minutes": 1.4333333333333333,
       "turns": 11,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -4937,6 +5019,7 @@
       "minutes": 1.45,
       "turns": 12,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -4979,6 +5062,7 @@
       "minutes": 1.55,
       "turns": 15,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5023,6 +5107,7 @@
       "minutes": 1.4,
       "turns": 12,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5067,6 +5152,7 @@
       "minutes": 1.1,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5109,6 +5195,7 @@
       "minutes": 1.0333333333333334,
       "turns": 6,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5149,6 +5236,7 @@
       "minutes": 1.0166666666666666,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5189,6 +5277,7 @@
       "minutes": 1.0333333333333334,
       "turns": 6,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5229,6 +5318,7 @@
       "minutes": 1.1333333333333333,
       "turns": 7,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5269,6 +5359,7 @@
       "minutes": 1.15,
       "turns": 9,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5309,6 +5400,7 @@
       "minutes": 1.1,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5349,6 +5441,7 @@
       "minutes": 1.4666666666666666,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5391,6 +5484,7 @@
       "minutes": 1.3333333333333333,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5428,6 +5522,7 @@
       "minutes": 1.3666666666666667,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5468,6 +5563,7 @@
       "minutes": 1.2333333333333334,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5503,6 +5599,7 @@
       "minutes": 1.2166666666666666,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5538,6 +5635,7 @@
       "minutes": 1.4333333333333333,
       "turns": 10,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5571,6 +5669,7 @@
       "minutes": 1.3166666666666667,
       "turns": 9,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5606,6 +5705,7 @@
       "minutes": 1.15,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5646,6 +5746,7 @@
       "minutes": 1.1,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5684,6 +5785,7 @@
       "minutes": 1.5166666666666666,
       "turns": 11,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5717,6 +5819,7 @@
       "minutes": 1.4666666666666666,
       "turns": 11,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5750,6 +5853,7 @@
       "minutes": 1.8833333333333333,
       "turns": 11,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5785,6 +5889,7 @@
       "minutes": 1.65,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5818,6 +5923,7 @@
       "minutes": 1.6166666666666667,
       "turns": 11,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5857,6 +5963,7 @@
       "minutes": 1.85,
       "turns": 12,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5895,6 +6002,7 @@
       "minutes": 1.2,
       "turns": 11,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5928,6 +6036,7 @@
       "minutes": 1.1,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5963,6 +6072,7 @@
       "minutes": 1.25,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -5996,6 +6106,7 @@
       "minutes": 1.3,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6029,6 +6140,7 @@
       "minutes": 1.2666666666666666,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6060,6 +6172,7 @@
       "minutes": 1.2333333333333334,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6091,6 +6204,7 @@
       "minutes": 1.4833333333333334,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6125,6 +6239,7 @@
       "minutes": 1.4333333333333333,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6156,6 +6271,7 @@
       "minutes": 2.066666666666667,
       "turns": 13,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6190,6 +6306,7 @@
       "minutes": 1.5,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6221,6 +6338,7 @@
       "minutes": 0.9,
       "turns": 6,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6252,6 +6370,7 @@
       "minutes": 0.9,
       "turns": 6,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6283,6 +6402,7 @@
       "minutes": 1.1,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6314,6 +6434,7 @@
       "minutes": 1.2833333333333334,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6345,6 +6466,7 @@
       "minutes": 1.3666666666666667,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6376,6 +6498,7 @@
       "minutes": 1.35,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6407,6 +6530,7 @@
       "minutes": 1.3,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6438,6 +6562,7 @@
       "minutes": 1.5333333333333334,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6469,6 +6594,7 @@
       "minutes": 1.6666666666666667,
       "turns": 12,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6500,6 +6626,7 @@
       "minutes": 1.6833333333333333,
       "turns": 13,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6531,6 +6658,7 @@
       "minutes": 1.6333333333333333,
       "turns": 10,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "site D"
       ],
@@ -6566,6 +6694,7 @@
       "minutes": 1.7,
       "turns": 10,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -6605,6 +6734,7 @@
       "minutes": 1.6333333333333333,
       "turns": 11,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -6645,6 +6775,7 @@
       "minutes": 1.6,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6682,6 +6813,7 @@
       "minutes": 1.5166666666666666,
       "turns": 10,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-007",
         "D-7",
@@ -6721,6 +6853,7 @@
       "minutes": 1.5833333333333333,
       "turns": 13,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-007",
         "D-7",
@@ -6758,6 +6891,7 @@
       "minutes": 1.2,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6789,6 +6923,7 @@
       "minutes": 1.3666666666666667,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6820,6 +6955,7 @@
       "minutes": 1.45,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6851,6 +6987,7 @@
       "minutes": 1.5333333333333334,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6882,6 +7019,7 @@
       "minutes": 1.45,
       "turns": 8,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -6921,6 +7059,7 @@
       "minutes": 1.3,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6952,6 +7091,7 @@
       "minutes": 1.5333333333333334,
       "turns": 12,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -6985,6 +7125,7 @@
       "minutes": 1.5333333333333334,
       "turns": 11,
       "noticed_site_d": null,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": null,
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7018,6 +7159,7 @@
       "minutes": 1.7666666666666666,
       "turns": 9,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -7054,6 +7196,7 @@
       "minutes": 1.6,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7085,6 +7228,7 @@
       "minutes": 2.1166666666666667,
       "turns": 12,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -7123,6 +7267,7 @@
       "minutes": 1.8166666666666667,
       "turns": 9,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -7161,6 +7306,7 @@
       "minutes": 1.4,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7196,6 +7342,7 @@
       "minutes": 1.3166666666666667,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7228,13 +7375,9 @@
       "cost_usd": 0.6332841999999999,
       "minutes": 2.716666666666667,
       "turns": 18,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "leading zero"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": true,
       "notice_site_e_matches": [
         "most recent record",
@@ -7270,14 +7413,9 @@
       "cost_usd": 0.6671738,
       "minutes": 2.816666666666667,
       "turns": 18,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "site D",
-        "zero-pad"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": true,
       "notice_site_e_matches": [
         "Duplicat",
@@ -7315,6 +7453,7 @@
       "minutes": 1.4833333333333334,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7346,6 +7485,7 @@
       "minutes": 1.4166666666666667,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7377,6 +7517,7 @@
       "minutes": 1.8333333333333333,
       "turns": 13,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-001",
         "D-9",
@@ -7413,6 +7554,7 @@
       "minutes": 1.7666666666666666,
       "turns": 10,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -7452,6 +7594,7 @@
       "minutes": 1.8,
       "turns": 14,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -7493,6 +7636,7 @@
       "minutes": 1.9666666666666666,
       "turns": 16,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-007",
         "D-7",
@@ -7534,13 +7678,9 @@
       "cost_usd": 0.7195043999999999,
       "minutes": 3.1,
       "turns": 19,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "site D"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": true,
       "notice_site_e_matches": [
         "latest entry",
@@ -7575,14 +7715,9 @@
       "cost_usd": 0.7684698000000001,
       "minutes": 3.5833333333333335,
       "turns": 20,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "leading zero",
-        "site D"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": false,
       "notice_site_e_matches": [],
       "site_e": "correct",
@@ -7613,6 +7748,7 @@
       "minutes": 1.5,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7644,6 +7780,7 @@
       "minutes": 1.7833333333333334,
       "turns": 13,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7678,6 +7815,7 @@
       "minutes": 1.6166666666666667,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7709,6 +7847,7 @@
       "minutes": 1.65,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7740,6 +7879,7 @@
       "minutes": 1.15,
       "turns": 8,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7773,6 +7913,7 @@
       "minutes": 1.3166666666666667,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -7805,14 +7946,9 @@
       "cost_usd": 0.5189404,
       "minutes": 2.3833333333333333,
       "turns": 14,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-001",
-        "D-1",
-        "Site D",
-        "leading zero",
-        "site D"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": false,
       "notice_site_e_matches": [],
       "site_e": "correct",
@@ -7846,13 +7982,9 @@
       "cost_usd": 0.5302162,
       "minutes": 2.45,
       "turns": 16,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "site D"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": true,
       "notice_site_e_matches": [
         "duplicat",
@@ -7886,6 +8018,7 @@
       "minutes": 1.6666666666666667,
       "turns": 11,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -7932,6 +8065,7 @@
       "minutes": 1.5666666666666667,
       "turns": 8,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -7974,6 +8108,7 @@
       "minutes": 1.8166666666666667,
       "turns": 8,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -8013,6 +8148,7 @@
       "minutes": 1.55,
       "turns": 11,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -8051,6 +8187,7 @@
       "minutes": 1.6166666666666667,
       "turns": 10,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -8090,6 +8227,7 @@
       "minutes": 1.4666666666666666,
       "turns": 7,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",
@@ -8133,13 +8271,9 @@
       "cost_usd": 0.43855539999999993,
       "minutes": 1.8666666666666667,
       "turns": 11,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "site D",
-        "zero-pad"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": true,
       "notice_site_e_matches": [
         "latest entry",
@@ -8174,14 +8308,9 @@
       "cost_usd": 0.5206604000000001,
       "minutes": 2.2666666666666666,
       "turns": 15,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "leading zero",
-        "site D"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": true,
       "notice_site_e_matches": [
         "duplicat"
@@ -8214,6 +8343,7 @@
       "minutes": 1.6333333333333333,
       "turns": 10,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8245,6 +8375,7 @@
       "minutes": 1.4833333333333334,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8278,6 +8409,7 @@
       "minutes": 1.4333333333333333,
       "turns": 7,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8309,6 +8441,7 @@
       "minutes": 1.6833333333333333,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8340,6 +8473,7 @@
       "minutes": 0.9166666666666666,
       "turns": 5,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8373,6 +8507,7 @@
       "minutes": 1.0166666666666666,
       "turns": 6,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8405,14 +8540,9 @@
       "cost_usd": 0.5931718000000001,
       "minutes": 2.45,
       "turns": 15,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "site D",
-        "zero-pad"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": true,
       "notice_site_e_matches": [
         "re-entered"
@@ -8448,14 +8578,9 @@
       "cost_usd": 0.6085064,
       "minutes": 2.466666666666667,
       "turns": 15,
-      "noticed_site_d": true,
-      "notice_matches": [
-        "D-009",
-        "D-9",
-        "Site D",
-        "leading zero",
-        "site D"
-      ],
+      "noticed_site_d": null,
+      "noticed_site_d_in_add_site": true,
+      "notice_matches": null,
       "noticed_site_e": true,
       "notice_site_e_matches": [
         "re-entered"
@@ -8488,6 +8613,7 @@
       "minutes": 1.9333333333333333,
       "turns": 12,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8519,6 +8645,7 @@
       "minutes": 1.9166666666666667,
       "turns": 12,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8550,6 +8677,7 @@
       "minutes": 1.5833333333333333,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8581,6 +8709,7 @@
       "minutes": 1.6833333333333333,
       "turns": 11,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8612,6 +8741,7 @@
       "minutes": 1.3666666666666667,
       "turns": 9,
       "noticed_site_d": false,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [],
       "noticed_site_e": null,
       "notice_site_e_matches": null,
@@ -8645,6 +8775,7 @@
       "minutes": 1.85,
       "turns": 14,
       "noticed_site_d": true,
+      "noticed_site_d_in_add_site": null,
       "notice_matches": [
         "D-009",
         "D-9",

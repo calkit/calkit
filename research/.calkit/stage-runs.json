@@ -227,14 +227,14 @@
     }
   },
   "summarize-agent-reliability": {
-    "start_time": "2026-11-28T17:06:53.805000",
-    "end_time": "2026-11-28T17:06:56.076000",
+    "start_time": "2026-11-28T17:10:22.075000",
+    "end_time": "2026-11-28T17:10:23.653000",
     "environment": "agent-reliability",
-    "git_rev": "69f4dbc32c0da8ab2e5d35eabaf49d2288c6e835",
+    "git_rev": "753a6bff33ebe1a80767d7f4890b1eeccbf52298",
     "git_dirty": true,
-    "dvc_lock_hash": "sha256:fbfd15d24ce3060c5cdb8099a900e70c3120479e9cdb0291e68d1640a19dbb02",
-    "calkit_version": "0.53.2.dev32+g69f4dbc32.d20261128",
-    "calkit_git_rev": "69f4dbc32c0da8ab2e5d35eabaf49d2288c6e835",
+    "dvc_lock_hash": "sha256:4682c7f69719d71ca7fc960c03fdd93ff68ae381560f1d3e96e76070bf5ecba5",
+    "calkit_version": "0.53.2.dev33+g753a6bff3",
+    "calkit_git_rev": "753a6bff33ebe1a80767d7f4890b1eeccbf52298",
     "system": {
       "machine_id": "33C4DDA7-7423-5B6A-B86F-EA6859EB058E",
       "os": "Darwin",

@@ -45,6 +45,9 @@ ARMS = [
     "calkit-hint",
 ]
 MESSY = {"messy", "messy-git"}
+# Tasks that send the agent to the site data, so mentioning site D there
+# isn't unprompted
+SITE_TASKS = {"fix-merge", "add-site"}
 INTERVENTION_ARMS = ["messy-git", "make", "make-hint", "calkit", "calkit-hint"]
 NOTICE = re.compile(r"\b[Ss]ite D\b|leading zero|zero-pad|\bD-\d+")
 # Site E's planted problem: four participants entered twice
@@ -131,8 +134,12 @@ def read_run(batch: str, run: Path, templates: dict) -> dict:
         allowed.append(str(Path(meta["calkit_command"]).parent.parent))
     t = read_transcript(run / "transcript.jsonl", allowed)
     noticed = None
-    if meta["task"] != "fix-merge" and t["final_message"] is not None:
-        noticed = sorted(set(NOTICE.findall(t["final_message"])))
+    noticed_in_add_site = None
+    if t["final_message"] is not None:
+        if meta["task"] not in SITE_TASKS:
+            noticed = sorted(set(NOTICE.findall(t["final_message"])))
+        elif meta["task"] == "add-site":
+            noticed_in_add_site = bool(NOTICE.search(t["final_message"]))
     noticed_e = None
     if meta["task"] == "add-site" and t["final_message"] is not None:
         noticed_e = sorted(
@@ -160,6 +167,7 @@ def read_run(batch: str, run: Path, templates: dict) -> dict:
         "minutes": int((run / "agent-seconds.txt").read_text()) / 60,
         "turns": t["turns"],
         "noticed_site_d": None if noticed is None else bool(noticed),
+        "noticed_site_d_in_add_site": noticed_in_add_site,
         "notice_matches": noticed,
         "noticed_site_e": None if noticed_e is None else bool(noticed_e),
         "notice_site_e_matches": noticed_e,
@@ -199,6 +207,16 @@ def tally(rows: list[dict]) -> dict:
             for r in rows
         ),
         **checks,
+        # Counting a trial whose only miss was also fixing a bug it wasn't
+        # asked to as passing
+        "n_ok": sum(
+            all(
+                r[c] is not False or (c == "correct" and bool(r["also_fixed"]))
+                for c in CHECKS
+                if c != "distant"
+            )
+            for r in rows
+        ),
         "n_incorrect_from_also_fixing": sum(
             r["correct"] is False and bool(r["also_fixed"]) for r in rows
         ),
@@ -309,6 +327,9 @@ def main() -> None:
             "n_loaded_conventions": sum(r["loaded_conventions"] for r in a),
             "n_named_readme": sum(r["named_readme"] for r in a),
             "site_d": count_noticed(a),
+            "site_d_in_add_site": count_noticed(
+                add_site, "noticed_site_d_in_add_site"
+            ),
             "site_e": count_noticed(a, "noticed_site_e"),
             "add_site_correct": {
                 "pass": sum(r["correct"] is True for r in add_site),
@@ -436,7 +457,8 @@ def format_markdown(s: dict) -> str:
         "",
         "## Site D noticed unprompted",
         "",
-        "Trials whose task isn't fix-merge whose final message matches"
+        "Trials whose task doesn't send the agent to the site data (not"
+        " fix-merge or add-site) whose final message matches"
         f" `{n['pattern']}`.",
         "",
         "| Arm | Task | Noticed |",
@@ -457,7 +479,9 @@ def format_markdown(s: dict) -> str:
         "",
         "In the batches the checking-guidance arms ran in"
         f" ({', '.join(n['interventions']['batches']) or 'none yet'}):"
-        " site D noticed as above, and site E's re-entered records"
+        " site D noticed as above, site D mentioned in add-site trials,"
+        " which send the agent to the site data, and site E's re-entered"
+        " records"
         " noticed in add-site trials whose final message matches"
         f" `{n['site_e_pattern']}`. Skill: trials that loaded the"
         " conventions skill, where calkit-hint's guidance is. README:"
@@ -465,9 +489,10 @@ def format_markdown(s: dict) -> str:
         " Site E handling: how the analysis table holds site E's"
         " re-entered participants.",
         "",
-        "| Arm | Trials | Skill | README | Site D noticed | Site E noticed"
-        " | add-site correct | Site E handling |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+        "| Arm | Trials | Skill | README | Site D noticed"
+        " | Site D in add-site | Site E noticed | add-site correct"
+        " | Site E handling |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
     ]
     for arm, a in n["interventions"]["arms"].items():
         handling = ", ".join(
@@ -477,6 +502,8 @@ def format_markdown(s: dict) -> str:
             f"| {arm} | {a['n']} | {a['n_loaded_conventions']}"
             f" | {a['n_named_readme']}"
             f" | {a['site_d']['noticed']}/{a['site_d']['n']}"
+            f" | {a['site_d_in_add_site']['noticed']}"
+            f"/{a['site_d_in_add_site']['n']}"
             f" | {a['site_e']['noticed']}/{a['site_e']['n']}"
             f" | {a['add_site_correct']['pass']}/{a['add_site_correct']['n']}"
             f" | {handling or '–'} |"

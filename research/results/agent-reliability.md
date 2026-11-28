@@ -76,7 +76,7 @@ Passes out of trials where the check applies; – where none do. All four: trial
 
 ## Site D noticed unprompted
 
-Trials whose task isn't fix-merge whose final message matches `\b[Ss]ite D\b|leading zero|zero-pad|\bD-\d+`.
+Trials whose task doesn't send the agent to the site data (not fix-merge or add-site) whose final message matches `\b[Ss]ite D\b|leading zero|zero-pad|\bD-\d+`.
 
 | Arm | Task | Noticed |
 | --- | --- | ---: |
@@ -90,15 +90,15 @@ Trials whose task isn't fix-merge whose final message matches `\b[Ss]ite D\b|lea
 | messy | regression | 2/2 |
 | messy | undo | 0/2 |
 | messy | all | 4/10 |
-| messy-git | add-site | 2/2 |
+| messy-git | add-site | 0/0 |
 | messy-git | data-correction | 0/4 |
 | messy-git | distant-consumer | 0/4 |
 | messy-git | provenance | 2/2 |
 | messy-git | regression | 1/2 |
 | messy-git | stale-clone | 3/4 |
 | messy-git | undo | 0/2 |
-| messy-git | all | 8/20 |
-| make | add-site | 2/2 |
+| messy-git | all | 6/18 |
+| make | add-site | 0/0 |
 | make | data-correction | 0/4 |
 | make | distant-consumer | 0/4 |
 | make | filter | 0/2 |
@@ -107,13 +107,13 @@ Trials whose task isn't fix-merge whose final message matches `\b[Ss]ite D\b|lea
 | make | regression | 0/2 |
 | make | stale-clone | 0/4 |
 | make | undo | 0/2 |
-| make | all | 2/24 |
-| make-hint | add-site | 2/2 |
+| make | all | 0/22 |
+| make-hint | add-site | 0/0 |
 | make-hint | data-correction | 2/2 |
 | make-hint | distant-consumer | 2/2 |
 | make-hint | stale-clone | 2/2 |
-| make-hint | all | 8/8 |
-| calkit | add-site | 2/2 |
+| make-hint | all | 6/6 |
+| calkit | add-site | 0/0 |
 | calkit | data-correction | 0/4 |
 | calkit | distant-consumer | 0/4 |
 | calkit | filter | 0/2 |
@@ -122,31 +122,31 @@ Trials whose task isn't fix-merge whose final message matches `\b[Ss]ite D\b|lea
 | calkit | regression | 0/2 |
 | calkit | stale-clone | 0/4 |
 | calkit | undo | 0/2 |
-| calkit | all | 2/24 |
-| calkit-hint | add-site | 2/2 |
+| calkit | all | 0/22 |
+| calkit-hint | add-site | 0/0 |
 | calkit-hint | data-correction | 0/2 |
 | calkit-hint | distant-consumer | 2/2 |
 | calkit-hint | stale-clone | 2/2 |
-| calkit-hint | all | 6/8 |
+| calkit-hint | all | 4/6 |
 
-Messy arms 12/30, the others without the checking guidance 4/54; one-sided Fisher exact p = 0.00048.
+Messy arms 10/28, the others without the checking guidance 0/50; one-sided Fisher exact p = 1e-05.
 
 ## Checking guidance
 
-In the batches the checking-guidance arms ran in (batch-3): site D noticed as above, and site E's re-entered records noticed in add-site trials whose final message matches `[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)`. Skill: trials that loaded the conventions skill, where calkit-hint's guidance is. README: trials whose tool inputs name README.md, where make-hint's is. Site E handling: how the analysis table holds site E's re-entered participants.
+In the batches the checking-guidance arms ran in (batch-3): site D noticed as above, site D mentioned in add-site trials, which send the agent to the site data, and site E's re-entered records noticed in add-site trials whose final message matches `[Dd]uplicat|[Rr]e-?enter(?:ed|s)?\b|[Rr]e-?entr(?:y|ies)\b|entered (?:twice|again)|(?:latest|most recent) (?:entry|record)`. Skill: trials that loaded the conventions skill, where calkit-hint's guidance is. README: trials whose tool inputs name README.md, where make-hint's is. Site E handling: how the analysis table holds site E's re-entered participants.
 
-| Arm | Trials | Skill | README | Site D noticed | Site E noticed | add-site correct | Site E handling |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| messy-git | 8 | 0 | 7 | 3/8 | 2/2 | 1/2 | correct 2 |
-| make | 8 | 0 | 3 | 2/8 | 2/2 | 1/2 | correct 2 |
-| make-hint | 8 | 0 | 4 | 8/8 | 1/2 | 0/2 | correct 2 |
-| calkit | 8 | 8 | 7 | 2/8 | 1/2 | 0/2 | correct 2 |
-| calkit-hint | 8 | 8 | 6 | 6/8 | 2/2 | 1/2 | correct 2 |
+| Arm | Trials | Skill | README | Site D noticed | Site D in add-site | Site E noticed | add-site correct | Site E handling |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| messy-git | 8 | 0 | 7 | 1/6 | 2/2 | 2/2 | 1/2 | correct 2 |
+| make | 8 | 0 | 3 | 0/6 | 2/2 | 2/2 | 1/2 | correct 2 |
+| make-hint | 8 | 0 | 4 | 6/6 | 2/2 | 1/2 | 0/2 | correct 2 |
+| calkit | 8 | 8 | 7 | 0/6 | 2/2 | 1/2 | 0/2 | correct 2 |
+| calkit-hint | 8 | 8 | 6 | 4/6 | 2/2 | 2/2 | 1/2 | correct 2 |
 
 | calkit-hint against | Test | Site D p | Site E p |
 | --- | --- | ---: | ---: |
-| calkit | Fisher exact, greater | 0.066 | 0.5 |
-| make-hint | Fisher exact, two-sided | 0.47 | 1 |
+| calkit | Fisher exact, greater | 0.03 | 0.5 |
+| make-hint | Fisher exact, two-sided | 0.45 | 1 |
 
 ## Isolation
 

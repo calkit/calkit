@@ -339,32 +339,34 @@ questions:
       data, history, or unrelated file is harmed (damage), and the report's
       numbers change when the raw data do (traceable).
     answer:
-      if calkit_all == calkit_n and make_all == make_n and none_trace == 0 and messy_trace == 0 and mgit_trace == 0 and mgit_also == mgit_stale_n - mgit_stale and make_stale == make_stale_n and calkit_stale == calkit_stale_n and none_correct == none_correct_n and messy_correct == messy_correct_n and mgit_correct_n - mgit_correct == mgit_stale_n - mgit_stale: >-
-        Not more than in a careful Makefile project, so far. Every Calkit
-        trial ({calkit_all} of {calkit_n}) and every Makefile trial
-        ({make_all} of {make_n}) passed all four checks. Agents in the plain
-        and messy folders got the numbers right too (correct in
+      if calkit_ok == calkit_n and make_ok == make_n and none_trace == 0 and messy_trace == 0 and mgit_trace == 0: >-
+        Not more than in a careful Makefile project, so far. Counting a
+        trial whose only miss was also fixing a bug it wasn't asked to as
+        passing, every Calkit trial ({calkit_ok}/{calkit_n}) and every
+        Makefile trial ({make_ok}/{make_n}) passed every check that applied
+        ({calkit_all} and {make_all} with no such fix). Agents in the plain
+        and messy folders mostly got the numbers right too (correct in
         {none_correct}/{none_correct_n} plain, {messy_correct}/{messy_correct_n}
         messy, and {mgit_correct}/{mgit_correct_n} messy-git trials), but
         none of their reports trace to results (traceable in
         {none_trace}/{none_trace_n}, {messy_trace}/{messy_trace_n}, and
         {mgit_trace}/{mgit_trace_n}), since those reports are typed by hand
-        and agents kept them that way. The only failures of correct were in
-        a fresh clone whose last commit changed code without rerunning:
-        messy-git agents passed in {mgit_stale}/{mgit_stale_n}, {mgit_also}
-        of them failing only because they also fixed site D's IDs, which
-        the task didn't ask for, against {make_stale}/{make_stale_n} with
-        Make and {calkit_stale}/{calkit_stale_n} with Calkit.
-        With two trials per arm and task, these tasks were too easy for a
-        capable agent to separate Calkit from Make.
+        and agents kept them that way. With two trials per arm and task,
+        these tasks were too easy for a capable agent to separate Calkit
+        from Make.
       else: >-
-        Not settled; see results/agent-reliability.md for every trial.
+        Not settled: {calkit_ok}/{calkit_n} Calkit and {make_ok}/{make_n}
+        Makefile trials passed every check that applied, counting a trial
+        whose only miss was also fixing an unrequested bug as passing; see
+        results/agent-reliability.md for every trial.
     evidence:
       - kind: result
         path: results/agent-reliability.json
         values:
+          calkit_ok: arms.calkit.all.n_ok
           calkit_all: arms.calkit.all.n_all_pass
           calkit_n: arms.calkit.all.n
+          make_ok: arms.make.all.n_ok
           make_all: arms.make.all.n_all_pass
           make_n: arms.make.all.n
           none_correct: arms.none.all.correct.pass
@@ -379,13 +381,6 @@ questions:
           messy_trace_n: arms.messy.all.traceable.n
           mgit_trace: arms.messy-git.all.traceable.pass
           mgit_trace_n: arms.messy-git.all.traceable.n
-          mgit_stale: arms.messy-git.tasks.stale-clone.correct.pass
-          mgit_stale_n: arms.messy-git.tasks.stale-clone.correct.n
-          mgit_also: arms.messy-git.tasks.stale-clone.n_incorrect_from_also_fixing
-          make_stale: arms.make.tasks.stale-clone.correct.pass
-          make_stale_n: arms.make.tasks.stale-clone.correct.n
-          calkit_stale: arms.calkit.tasks.stale-clone.correct.pass
-          calkit_stale_n: arms.calkit.tasks.stale-clone.correct.n
       - kind: table
         path: results/agent-reliability.md
 
@@ -397,12 +392,12 @@ questions:
       No: a pipeline that reruns everything lets an agent finish a task
       without looking at the data, so it notices less.
     approach: >-
-      In every trial whose task isn't fixing it, check whether the agent's
+      In every trial whose task doesn't send the agent to the site data
+      (not fixing site D, and not adding site E), check whether the agent's
       final message mentions the planted silent error, the merge dropping
-      site D because its participant IDs aren't zero-padded, by a strict,
-      case-sensitive pattern, and compare the messy arms with the others
-      not given guidance to check results (below) by a one-sided Fisher
-      exact test.
+      site D because its participant IDs aren't zero-padded, by a strict
+      pattern, and compare the messy arms with the others not given
+      guidance to check results (below) by a one-sided Fisher exact test.
     answer:
       if rest == 0 and messy > 0 and p < 0.01: >-
         No, by this measure. Agents mentioned site D's dropped participants
@@ -452,8 +447,9 @@ questions:
       in its README. Run them with the calkit, make, and messy-git arms on
       distant-consumer, data-correction, stale-clone, and add-site, which
       adds a site whose enrollment export enters four participants twice,
-      and count final messages that mention site D's dropped participants
-      or, in add-site, site E's re-entered records. Compare calkit-hint with
+      and count final messages that mention site D's dropped participants,
+      outside add-site, since adding a site sends the agent to the site
+      data, or, in add-site, site E's re-entered records. Compare calkit-hint with
       calkit by a one-sided Fisher exact test, for whether the guidance
       helps, and with make-hint by a two-sided one, for whether it matters
       that Calkit's skill delivers it.
@@ -471,6 +467,10 @@ questions:
         in {mh_d}/{mh_d_n} and {mh_e}/{mh_e_n} (two-sided p = {make_d_p:.2g}
         and {make_e_p:.2g} against calkit-hint), so Calkit's part is
         delivering the guidance without anyone writing it into the project.
+        Where the task itself sent agents to the site data, in add-site,
+        they mentioned site D in every arm (Calkit {calkit_da}/{calkit_da_n},
+        Make {make_da}/{make_da_n}) and every arm kept site E's corrected
+        records, so guidance matters for what a task doesn't touch.
       elif (hint_d_p < 0.05 or hint_e_p < 0.05) and hint_d * mh_d_n + hint_e * mh_e_n > mh_d * hint_d_n + mh_e * hint_e_n: >-
         Yes, and more through Calkit's skill than the same words in a
         README. Given the guidance in its skill, Calkit agents mentioned
@@ -508,6 +508,10 @@ questions:
           mh_d_n: noticing.interventions.arms.make-hint.site_d.n
           mh_e: noticing.interventions.arms.make-hint.site_e.noticed
           mh_e_n: noticing.interventions.arms.make-hint.site_e.n
+          calkit_da: noticing.interventions.arms.calkit.site_d_in_add_site.noticed
+          calkit_da_n: noticing.interventions.arms.calkit.site_d_in_add_site.n
+          make_da: noticing.interventions.arms.make.site_d_in_add_site.noticed
+          make_da_n: noticing.interventions.arms.make.site_d_in_add_site.n
           hint_d_p: noticing.interventions.tests.hint_vs_calkit.site_d_p
           hint_e_p: noticing.interventions.tests.hint_vs_calkit.site_e_p
           make_d_p: noticing.interventions.tests.hint_vs_make_hint.site_d_p
